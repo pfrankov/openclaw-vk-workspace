@@ -1,0 +1,93 @@
+{
+  "name": "@openclaw-vk/vk-workspace",
+  "version": "0.1.0",
+  "description": "OpenClaw channel for VK Workspaces / VK Teams bots",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Pavel Frankov",
+    "url": "https://github.com/pfrankov"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pfrankov/openclaw-vk-workspace.git"
+  },
+  "homepage": "https://github.com/pfrankov/openclaw-vk-workspace#readme",
+  "bugs": {
+    "url": "https://github.com/pfrankov/openclaw-vk-workspace/issues"
+  },
+  "engines": {
+    "node": ">=24.16.0"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "openclaw-channel",
+    "vk-teams",
+    "vk-workspace"
+  ],
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage test/*.test.js",
+    "check": "npm test && npm run build && npm run check:pack",
+    "check:pack": "node scripts/check-pack.mjs",
+    "check:host": "node scripts/host-smoke.mjs",
+    "prepack": "npm run build",
+    "install:host": "node scripts/install-host.mjs"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.9.3 <2027"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "openclaw": {
+    "compat": {
+      "pluginApi": ">=2026.9.3",
+      "minGatewayVersion": "2026.9.3"
+    },
+    "build": {
+      "openclawVersion": "2026.9.3",
+      "pluginSdkVersion": "2026.9.3"
+    },
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "setupEntry": "./dist/setup-entry.js",
+    "runtimeSetupEntry": "./dist/setup-entry.js",
+    "channel": {
+      "id": "vk-workspace",
+      "label": "VK Workspace",
+      "selectionLabel": "VK Workspace (VK Teams Bot)",
+      "docsPath": "/channels/vk-workspace",
+      "docsLabel": "vk-workspace",
+      "blurb": "VK Teams bot with a configurable Bot API URL and token.",
+      "order": 81,
+      "quickstartAllowFrom": true
+    },
+    "install": {
+      "npmSpec": "@openclaw-vk/vk-workspace",
+      "localPath": "extensions/vk-workspace",
+      "defaultChoice": "local"
+    }
+  }
+}

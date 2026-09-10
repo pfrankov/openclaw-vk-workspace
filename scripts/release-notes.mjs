@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { readFile, writeFile } from 'node:fs/promises';
+const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+const tag = process.env.GITHUB_REF_NAME;
+assert.equal(tag, `v${pkg.version}`, 'Tag must match package.json version');
+assert.match(tag, /^v\d+\.\d+\.\d+$/, 'Only stable version tags are supported');
+const changelog = await readFile('CHANGELOG.md', 'utf8');
+const heading = `## [${pkg.version}]`;
+const start = changelog.indexOf(heading);
+assert(start >= 0, 'Add a CHANGELOG entry before tagging a release');
+const end = changelog.indexOf('\n## [', start + heading.length);
+await writeFile('release/NOTES.md', changelog.slice(start, end < 0 ? undefined : end).trim() + '\n');
