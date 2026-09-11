@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Inbox, inboxPath } from '../src/inbox.js';
 import { drainInbox, monitorAccount } from '../src/monitor.js';
 import { ApiError } from '../src/api.js';
-import { ProcessingFailure } from '../src/processing-failure.js';
+import { ProcessingFailure, safeFailure } from '../src/processing-failure.js';
 import { event, account, tempDir, config } from './helpers.js';
 
 const statusSdk = {
@@ -85,6 +85,16 @@ test('failed events retain only safe stage diagnostics and clear them before exp
     message: 'Media download failed: origin https://files-n.lesta.group is not allowed; add it to mediaAllowedOrigins' } });
   assert.deepEqual(inbox.state.failed[0].failure, reported.failure);
   await inbox.retryFailed(); assert.equal(inbox.state.pending[0].failure, undefined);
+});
+test('generated failure diagnostics remain valid and readable after truncation and restart', async (t) => {
+  const path = join(await tempDir(t), 'state.json'); const inbox = await new Inbox(path).open();
+  await inbox.ingest([event(1)]);
+  const failure = safeFailure(new ProcessingFailure('INVALID', 'also invalid', `Origin ${'x'.repeat(500)}\u0000secret`), 'media-download');
+  assert.equal(failure.stage, 'media-download'); assert.equal(failure.code, 'unexpected');
+  assert(failure.message.length <= 300); assert(!failure.message.includes('\u0000'));
+  await inbox.fail('1', { terminal: true, failure }); await inbox.close();
+  const reopened = await new Inbox(path).open(); t.after(() => reopened.close());
+  assert.deepEqual(reopened.state.failed[0].failure, failure);
 });
 test('abort does not mark an unfinished event as completed or failed', async (t) => {
   const inbox = await makeInbox(t); await inbox.ingest([event(1)]); const controller = new AbortController();

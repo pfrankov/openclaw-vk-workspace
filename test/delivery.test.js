@@ -220,6 +220,13 @@ test('voice normalization recognizes common audio signatures and rejects unknown
   assert.throws(() => normalizeVoiceMedia({ buffer: Buffer.from('unknown'), fileName: 'opaque', contentType: 'application/octet-stream' }),
     (error) => error.stage === 'media-normalize' && error.code === 'unsupported-audio');
 });
+test('voice normalization canonicalizes MIME aliases and ignores unknown audio types', () => {
+  const wav = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVE'), Buffer.alloc(8)]);
+  assert.deepEqual(normalizeVoiceMedia({ buffer: wav, fileName: 'voice', contentType: 'audio/x-wav' }),
+    { contentType: 'audio/wav', fileName: 'voice.wav' });
+  assert.deepEqual(normalizeVoiceMedia({ buffer: wav, fileName: 'voice', contentType: 'audio/vendor-unknown' }),
+    { contentType: 'audio/wav', fileName: 'voice.wav' });
+});
 test('untrusted inbound CDN reports a safe actionable origin without its signed URL', async () => {
   const { core } = installRuntime(); const a = account();
   await assert.rejects(inboundMedia([{ type: 'voice', payload: { fileId: 'voice-id' } }], { account: a, core, api: {

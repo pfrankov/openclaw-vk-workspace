@@ -11,6 +11,9 @@ const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.aac': 'audio/aac', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.wav': 'audio/wav', '.zip': 'application/zip' };
 const AUDIO_EXTENSION = { 'audio/ogg': '.ogg', 'audio/opus': '.opus', 'audio/aac': '.m4a',
   'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/wav': '.wav', 'audio/webm': '.webm' };
+const AUDIO_MIME_ALIAS = { 'application/ogg': 'audio/ogg', 'audio/mp3': 'audio/mpeg',
+  'audio/x-aac': 'audio/aac', 'audio/x-m4a': 'audio/mp4', 'audio/x-mpeg': 'audio/mpeg',
+  'audio/x-opus+ogg': 'audio/ogg', 'audio/x-wav': 'audio/wav', 'audio/vnd.wave': 'audio/wav' };
 export function safeFileName(value) {
   const name = basename(String(value || 'attachment.bin').replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
   return !name || name === '.' || name === '..' ? 'attachment.bin' : name;
@@ -82,7 +85,12 @@ export function normalizeVoiceMedia({ buffer, fileName, contentType, declaredTyp
   const name = safeFileName(fileName || 'voice');
   const declaredMime = typeof declaredType === 'string' && declaredType.includes('/') ? declaredType.split(';')[0] : undefined;
   const extensionMime = MIME[extname(name).toLowerCase()];
-  const mime = [contentType?.split(';')[0], declaredMime, extensionMime].find((value) => value?.startsWith('audio/')) ?? sniffAudio(buffer);
+  const canonical = (value) => {
+    const normalized = value?.trim().toLowerCase();
+    const candidate = AUDIO_MIME_ALIAS[normalized] ?? normalized;
+    return AUDIO_EXTENSION[candidate] ? candidate : undefined;
+  };
+  const mime = [contentType?.split(';')[0], declaredMime, extensionMime].map(canonical).find(Boolean) ?? sniffAudio(buffer);
   if (!mime || !AUDIO_EXTENSION[mime]) throw new ProcessingFailure('media-normalize', 'unsupported-audio',
     'Voice attachment format could not be identified');
   const suffix = AUDIO_EXTENSION[mime];
