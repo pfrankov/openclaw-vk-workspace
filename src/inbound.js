@@ -169,7 +169,10 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
       dispatcherOptions: { ...prefix,
         deliver: async (payload) => {
           if (settled || signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
-          const result = await sendPayload(message.chatId, payload, { cfg, account, api, core, signal,
+          const deliveryPayload = message.isGroup || message.callback
+            ? payload
+            : { ...payload, replyToId: undefined };
+          const result = await sendPayload(message.chatId, deliveryPayload, { cfg, account, api, core, signal,
             requesterSenderId: message.senderId, messageStore: store,
             replyToId: message.callback?.messageId ?? (message.isGroup ? message.messageId : undefined),
             mediaLocalRoots: sdk.mediaRoots(cfg, route.agentId) });

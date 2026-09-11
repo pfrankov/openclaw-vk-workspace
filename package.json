@@ -1,6 +1,6 @@
 {
   "name": "@openclaw-vk/vk-workspace",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "OpenClaw channel for VK Workspaces / VK Teams bots",
   "type": "module",
   "license": "Apache-2.0",
