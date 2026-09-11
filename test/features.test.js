@@ -199,6 +199,7 @@ test('callbacks dispatch as the clicking user, not the bot, and deduplicate repe
   const f = fixture(); const item = await menu(f); await receive(f, item);
   assert.equal(f.seen.dispatches, 1); assert.equal(f.seen.contexts[0].SenderId, USER);
   assert.equal(f.seen.contexts[0].CommandBody, 'Продолжить'); assert.equal(f.seen.contexts[0].MessageSid, 'callback:query-100');
+  assert.equal(f.sent.at(-1).options.replyToId, item.payload.message.msgId);
   assert(!JSON.stringify(f.seen.contexts).includes(item.payload.callbackData));
   await receive(f, { ...item, eventId: 101 }); assert.equal(f.seen.dispatches, 1);
 });

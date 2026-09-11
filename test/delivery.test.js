@@ -79,6 +79,15 @@ test('approved inbound message reaches session, agent dispatcher and real Bot AP
   assert.equal(seen.contexts[0].CommandAuthorized, true); assert.equal(seen.sessions.length, 1);
   const sent = server.requests.find((req) => req.url.pathname.endsWith('sendText'));
   assert.equal(sent.url.searchParams.get('chatId'), 'user@example.com'); assert.equal(sent.url.searchParams.get('text'), 'Ответ');
+  assert.equal(sent.url.searchParams.get('replyMsgId'), null);
+});
+test('group replies quote the inbound message', async (t) => {
+  const server = await httpServer(t, (req, res) => res.end(JSON.stringify({ ok: true, ...(req.url.pathname.endsWith('sendText') ? { msgId: 'reply' } : {}) })));
+  const cfg = config({ baseUrl: server.origin, allowInsecureHttp: true, groupPolicy: 'allowlist',
+    groupAllowFrom: ['user@example.com'], groups: { '123@chat.agent': { requireMention: false } } });
+  const a = resolveAccount(cfg); installRuntime({ cfg });
+  await handleInbound({ event: groupEvent(), self, cfg, account: a, api: new TeamsApi(a) });
+  const sent = server.requests.find((req) => req.url.pathname.endsWith('sendText'));
   assert.equal(sent.url.searchParams.get('replyMsgId'), 'message-1');
 });
 test('dispatcher errors are surfaced so durable inbox does not mark delivery complete', async () => {

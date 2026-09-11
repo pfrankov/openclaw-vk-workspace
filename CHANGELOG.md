@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.4] - 2026-09-11
+
+### Fixed
+
+- Direct-chat replies no longer quote the inbound message.
+- Group-chat replies quote the inbound message, while callback replies remain attached to the message that contained the button.
+
+### Scope
+
+- Reply threading changed; routing, access control and callback authorization did not.
+
 ## [0.1.3] - 2026-09-11
 
 ### Fixed

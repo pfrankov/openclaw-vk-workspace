@@ -144,7 +144,8 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
           if (settled || signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
           const result = await sendPayload(message.chatId, payload, { cfg, account, api, core, signal,
             requesterSenderId: message.senderId, messageStore: store,
-            replyToId: message.callback?.messageId ?? message.messageId, mediaLocalRoots: sdk.mediaRoots(cfg, route.agentId) });
+            replyToId: message.callback?.messageId ?? (message.isGroup ? message.messageId : undefined),
+            mediaLocalRoots: sdk.mediaRoots(cfg, route.agentId) });
           if (result.messageId) setStatus?.({ lastOutboundAt: Date.now() });
         },
         onError: () => { deliveryFailed = true; log?.('VK Workspace reply dispatch failed'); },
