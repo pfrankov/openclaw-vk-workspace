@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.3] - 2026-09-11
+
+### Fixed
+
+- Matched the Node.js engine range exactly to OpenClaw 2026.9.3: Node.js 24.16–24.x or 26.1 and newer.
+- Node.js 25 is no longer incorrectly accepted by package metadata.
+
+### Scope
+
+- No channel runtime behavior changed.
+
 ## [0.1.2] - 2026-09-11
 
 ### Improved
