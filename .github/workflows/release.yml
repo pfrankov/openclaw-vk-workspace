@@ -30,13 +30,8 @@ jobs:
       - run: npm run check
       - run: npm run install:host
       - run: npm run check:host
-      - name: Build release assets and validate version
-        run: |
-          mkdir -p release
-          node scripts/release-notes.mjs
-          npm pack --ignore-scripts --pack-destination release
-          cd release
-          sha256sum *.tgz > SHA256SUMS
+      - name: Validate release metadata
+        run: node scripts/release-notes.mjs "$RUNNER_TEMP/NOTES.md"
       - name: Publish to npm with trusted publishing
         run: npm publish --ignore-scripts --access public
       - name: Create GitHub release without overwriting an existing release
@@ -44,5 +39,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$GITHUB_REF_NAME" release/*.tgz release/SHA256SUMS \
-            --verify-tag --title "$GITHUB_REF_NAME" --notes-file release/NOTES.md
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/NOTES.md"

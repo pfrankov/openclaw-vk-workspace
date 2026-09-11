@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.2] - 2026-09-11
+
+### Improved
+
+- Made npm the single distribution channel and removed duplicate package archives and checksums from GitHub Releases.
+- Simplified installation documentation to the supported npm path; GitHub Releases now contain version notes only.
+
+### Scope
+
+- No channel runtime behavior changed. Release validation, Trusted Publishing and npm provenance remain unchanged.
+
 ## [0.1.1] - 2026-09-11
 
 ### Added
