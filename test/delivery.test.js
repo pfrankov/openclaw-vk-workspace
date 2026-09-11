@@ -126,7 +126,8 @@ test('open chat access does not authorize unallowlisted control commands', async
 test('approved inbound message reaches session, agent dispatcher and real Bot API reply', async (t) => {
   const server = await httpServer(t, (req, res) => res.end(JSON.stringify({ ok: true, ...(req.url.pathname.endsWith('sendText') ? { msgId: 'reply' } : {}) })));
   const cfg = config({ baseUrl: server.origin, allowInsecureHttp: true });
-  const a = resolveAccount(cfg); const { seen } = installRuntime({ cfg, paired: ['user@example.com'] });
+  const a = resolveAccount(cfg); const { seen } = installRuntime({ cfg, paired: ['user@example.com'],
+    payloads: [{ text: 'Ответ', replyToId: 'dispatcher-reply' }] });
   await handleInbound({ event: event(), self, cfg, account: a, api: new TeamsApi(a) });
   assert.equal(seen.dispatches, 1); assert.equal(seen.routes[0].cfg.session.dmScope, 'per-account-channel-peer');
   assert.equal(seen.contexts[0].Provider, 'vk-workspace'); assert.equal(seen.contexts[0].MessageSid, 'message-1');

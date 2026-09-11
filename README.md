@@ -281,8 +281,8 @@ npm run check:host     # загрузка архива и проверка ко�
 CI запускается на PR и изменениях `main`. Для релиза обновите версии в `package.json`, `package-lock.json`, `openclaw.plugin.json` и [CHANGELOG.md](CHANGELOG.md). После проверок и merge создайте тег на проверенном коммите `main`:
 
 ```bash
-git tag v0.1.7
-git push origin v0.1.7
+git tag v0.1.8
+git push origin v0.1.8
 ```
 
 Workflow проверяет принадлежность коммита `main`, совпадение версий и CHANGELOG, повторяет тесты и SDK-проверку, публикует пакет в npm через Trusted Publishing и создаёт GitHub Release с заметками из CHANGELOG. npm добавляет provenance автоматически. Actions закреплены полными SHA; существующие npm-версии и GitHub Releases не перезаписываются. Токен VK Teams и постоянный `NPM_TOKEN` не нужны.

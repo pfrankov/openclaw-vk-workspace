@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.8] - 2026-09-11
+
+### Fixed
+
+- Direct-message replies now discard a dispatcher-provided `replyToId`, while group replies and callback responses retain their contextual message binding.
+
 ## [0.1.7] - 2026-09-11
 
 ### Fixed
