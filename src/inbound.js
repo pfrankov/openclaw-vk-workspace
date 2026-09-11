@@ -92,8 +92,26 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
     hasControlCommand: hasCommand,
     authorizers: [{ configured: access.allowFrom.length > 0, allowed: matchesAllowFrom(access.allowFrom, message.senderId) }] });
   if (hasCommand && commandGate.shouldBlock) { await answer('Command access denied.'); return; }
-  const mentioned = message.wasMentioned || core.channel.mentions.matchesMentionPatterns(message.visibleText,
-    core.channel.mentions.buildMentionRegexes(cfg));
+  const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg);
+  let mentioned = message.wasMentioned || core.channel.mentions.matchesMentionPatterns(message.visibleText, mentionRegexes);
+  let route;
+  let media;
+  let preflightTranscript;
+  const voiceOnly = !message.visibleText.trim() && message.parts.some((part) => part?.type === 'voice' && part.payload?.fileId);
+  if (message.isGroup && access.requireMention && !mentioned && !(hasCommand && commandGate.commandAuthorized) && voiceOnly && mentionRegexes.length) {
+    route = core.channel.routing.resolveAgentRoute({ cfg, channel: CHANNEL_ID, accountId: account.accountId,
+      peer: { kind: 'group', id: message.chatId } });
+    media = await inboundMedia(message.parts, { api, account, core, signal });
+    const mediaFacts = sdk.mediaFacts(media, { messageId: message.messageId });
+    preflightTranscript = await sdk.audioPreflight.resolve({ abortSignal: signal, request: { cfg,
+      ctx: { Provider: CHANNEL_ID, Surface: CHANNEL_ID, OriginatingChannel: CHANNEL_ID,
+        OriginatingTo: `${CHANNEL_ID}:${message.chatId}`, AccountId: account.accountId, media: mediaFacts } } });
+    mentioned = Boolean(preflightTranscript && core.channel.mentions.matchesMentionPatterns(preflightTranscript, mentionRegexes));
+    if (mentioned) {
+      message.text = sdk.formatAudioTranscript(preflightTranscript);
+      media = mediaFacts;
+    }
+  }
   if (message.isGroup && access.requireMention && !mentioned && !(hasCommand && commandGate.commandAuthorized)) return;
 
   if (message.callback) {
@@ -103,11 +121,12 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
     await answer('Accepted');
   }
   signal?.throwIfAborted();
-  // Authorization and mention policy run before downloads, session writes or agent invocation.
-  const route = core.channel.routing.resolveAgentRoute({ cfg, channel: CHANNEL_ID, accountId: account.accountId,
+  // Authorization runs before downloads. Mention policy runs before downloads except for the
+  // bounded voice-only preflight above, which is required to detect a spoken mention.
+  route ??= core.channel.routing.resolveAgentRoute({ cfg, channel: CHANNEL_ID, accountId: account.accountId,
     peer: { kind: message.isGroup ? 'group' : 'direct', id: message.chatId } });
   const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId });
-  const media = await inboundMedia(message.parts, { api, account, core, signal });
+  media ??= await inboundMedia(message.parts, { api, account, core, signal });
   signal?.throwIfAborted();
   const from = `${CHANNEL_ID}:${message.isGroup ? 'chat:' : ''}${message.chatId}`;
   const ctx = core.channel.reply.finalizeInboundContext({
@@ -127,6 +146,8 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
   });
   await core.channel.session.recordInboundSession({ storePath, ctx, sessionKey: route.sessionKey,
     onRecordError: () => log?.('VK Workspace session metadata could not be updated') });
+  if (preflightTranscript) await sdk.audioPreflight.send({ transcript: preflightTranscript, cfg,
+    accountId: account.accountId, originatingTo: `${CHANNEL_ID}:${message.chatId}` });
   signal?.throwIfAborted();
   setStatus?.({ lastInboundAt: Date.now() });
   const { onModelSelected, ...prefix } = sdk.replyPrefix({ cfg, agentId: route.agentId, channel: CHANNEL_ID, accountId: account.accountId });

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.6] - 2026-09-11
+
+### Fixed
+
+- Voice-only messages in mention-gated groups now use OpenClaw's audio preflight so a spoken configured mention can address the bot.
+- A preflight transcript that does not mention the bot neither starts an agent turn nor emits a transcript echo.
+
+### Scope
+
+- Access and command authorization still run before media download. Direct messages, captioned voice messages and groups without mention gating keep the existing media-understanding path.
+
 ## [0.1.5] - 2026-09-11
 
 ### Fixed

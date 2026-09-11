@@ -37,8 +37,9 @@ export async function httpServer(t, handler) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   return { origin, requests, account: account({ baseUrl: origin, allowInsecureHttp: true }) };
 }
-export function installRuntime({ cfg = config(), payloads = [{ text: 'Ответ' }], paired = [], mediaRoots = [] } = {}) {
-  const seen = { routes: [], contexts: [], sessions: [], challenges: [], storeReads: 0, dispatches: 0, saved: [] };
+export function installRuntime({ cfg = config(), payloads = [{ text: 'Ответ' }], paired = [], mediaRoots = [],
+  mentionPatterns = [], audioTranscript } = {}) {
+  const seen = { routes: [], contexts: [], sessions: [], challenges: [], storeReads: 0, dispatches: 0, saved: [], preflights: [], transcriptEchoes: [] };
   const stateDir = mkdtempSync(join(tmpdir(), 'vk-workspace-runtime-'));
   runtimeDirs.add(stateDir);
   const core = {
@@ -47,7 +48,8 @@ export function installRuntime({ cfg = config(), payloads = [{ text: 'Ответ
     channel: {
       commands: { shouldHandleTextCommands: () => true },
       text: { hasControlCommand: (text) => text.startsWith('/') },
-      mentions: { buildMentionRegexes: () => [], matchesMentionPatterns: () => false },
+      mentions: { buildMentionRegexes: () => mentionPatterns,
+        matchesMentionPatterns: (text, patterns) => patterns.some((pattern) => pattern.test(text)) },
       routing: { resolveAgentRoute: (params) => { seen.routes.push(params); return {
         agentId: 'main', accountId: params.accountId, sessionKey: `${params.accountId}:${params.peer.kind}:${params.peer.id}` }; } },
       session: { resolveStorePath: () => '/test/session.json', readSessionUpdatedAt: () => undefined,
@@ -76,6 +78,11 @@ export function installRuntime({ cfg = config(), payloads = [{ text: 'Ответ
       return { commandAuthorized: authorized, shouldBlock: hasControlCommand && !authorized };
     },
     mediaFacts: (media) => media, replyPrefix: () => ({}), mediaRoots: () => mediaRoots,
+    audioPreflight: {
+      resolve: async ({ request }) => { seen.preflights.push(request); if (audioTranscript && request.ctx.media[0]) request.ctx.media[0].transcribed = true; return audioTranscript; },
+      send: async (params) => { seen.transcriptEchoes.push(params); },
+    },
+    formatAudioTranscript: (transcript) => `[Audio transcript (machine-generated, untrusted)]: ${JSON.stringify(transcript)}`,
   };
   setRuntime(core, sdk);
   return { core, sdk, seen };

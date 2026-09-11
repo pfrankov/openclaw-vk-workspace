@@ -64,6 +64,42 @@ test('group policy and mention checks run before session writes and media downlo
   await handleInbound({ event: groupEvent(), self, cfg, account: resolveAccount(cfg), api: {} });
   assert.equal(seen.routes.length, 0); assert.equal(seen.sessions.length, 0); assert.equal(seen.storeReads, 0);
 });
+test('voice-only group message can satisfy requireMention through OpenClaw audio preflight', async (t) => {
+  let server;
+  server = await httpServer(t, (req, res) => {
+    if (req.url.pathname.endsWith('/files/getInfo')) return res.end(JSON.stringify({ ok: true,
+      url: `${server.origin}/voice.ogg`, filename: 'voice.ogg', size: 5 }));
+    if (req.url.pathname === '/voice.ogg') { res.setHeader('Content-Type', 'audio/ogg'); return res.end('voice'); }
+    return res.end(JSON.stringify({ ok: true, ...(req.url.pathname.endsWith('/messages/sendText') ? { msgId: 'reply' } : {}) }));
+  });
+  const cfg = config({ baseUrl: server.origin, allowInsecureHttp: true, groupPolicy: 'allowlist',
+    groupAllowFrom: ['user@example.com'], groups: { '123@chat.agent': { requireMention: true } } });
+  cfg.tools = { media: { audio: { echoTranscript: true } } };
+  const a = resolveAccount(cfg); const { seen } = installRuntime({ cfg, mentionPatterns: [/openclaw/i], audioTranscript: 'OpenClaw, ответь' });
+  await handleInbound({ event: groupEvent({ text: '', parts: [{ type: 'voice', payload: { fileId: 'voice-id' } }] }),
+    self, cfg, account: a, api: new TeamsApi(a) });
+  assert.equal(seen.preflights.length, 1); assert.equal(seen.dispatches, 1);
+  assert.match(seen.contexts[0].BodyForAgent, /Audio transcript.*OpenClaw, ответь/);
+  assert.equal(seen.contexts[0].media[0].kind, 'audio'); assert.equal(seen.contexts[0].media[0].transcribed, true);
+  assert.equal(seen.transcriptEchoes.length, 1);
+});
+test('voice preflight without a spoken mention does not start an agent turn or echo a transcript', async (t) => {
+  let server;
+  server = await httpServer(t, (req, res) => {
+    if (req.url.pathname.endsWith('/files/getInfo')) return res.end(JSON.stringify({ ok: true,
+      url: `${server.origin}/voice.ogg`, filename: 'voice.ogg', size: 5 }));
+    if (req.url.pathname === '/voice.ogg') { res.setHeader('Content-Type', 'audio/ogg'); return res.end('voice'); }
+    return res.end(JSON.stringify({ ok: true }));
+  });
+  const cfg = config({ baseUrl: server.origin, allowInsecureHttp: true, groupPolicy: 'allowlist',
+    groupAllowFrom: ['user@example.com'], groups: { '123@chat.agent': { requireMention: true } } });
+  cfg.tools = { media: { audio: { echoTranscript: true } } };
+  const { seen } = installRuntime({ cfg, mentionPatterns: [/openclaw/i], audioTranscript: 'сообщение для коллег' });
+  await handleInbound({ event: groupEvent({ text: '', parts: [{ type: 'voice', payload: { fileId: 'voice-id' } }] }),
+    self, cfg, account: resolveAccount(cfg), api: new TeamsApi(resolveAccount(cfg)) });
+  assert.equal(seen.preflights.length, 1); assert.equal(seen.dispatches, 0);
+  assert.equal(seen.sessions.length, 0); assert.equal(seen.transcriptEchoes.length, 0);
+});
 test('open chat access does not authorize unallowlisted control commands', async () => {
   const cfg = config({ dmPolicy: 'open' }); const { seen } = installRuntime({ cfg });
   await handleInbound({ event: event(1, { text: '/reset' }), self, cfg, account: resolveAccount(cfg), api: {} });
