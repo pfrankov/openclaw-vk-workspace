@@ -16,18 +16,27 @@
 
 Сначала настройте OpenClaw и выбранного агента: канал не создаёт модель и не заменяет её API-ключи.
 
-### Готовый релиз
+### Из npm
 
-Скачайте `.tgz` и `SHA256SUMS` из [GitHub Releases](https://github.com/pfrankov/openclaw-vk-workspace/releases). Для версии `0.1.0`:
+```bash
+openclaw plugins install @openclaw-vk/vk-workspace
+openclaw plugins enable vk-workspace
+```
+
+Пакет публикуется в существующей организации [`openclaw-vk`](https://www.npmjs.com/org/openclaw-vk) через Trusted Publishing GitHub Actions. Для публикации используются короткоживущие OIDC-учётные данные и provenance; постоянный `NPM_TOKEN` не хранится.
+
+### Архив GitHub Release
+
+Скачайте `.tgz` и `SHA256SUMS` из [GitHub Releases](https://github.com/pfrankov/openclaw-vk-workspace/releases). Для версии `0.1.1`:
 
 ```bash
 # Linux; на macOS: shasum -a 256 -c SHA256SUMS
 sha256sum -c SHA256SUMS
-openclaw plugins install ./openclaw-vk-vk-workspace-0.1.0.tgz
+openclaw plugins install ./openclaw-vk-vk-workspace-0.1.1.tgz
 openclaw plugins enable vk-workspace
 ```
 
-Релиз появляется после публикации тега. До первого релиза используйте исходники. Автоматическая публикация в npm не предусмотрена.
+Один проверенный тег создаёт npm-публикацию и GitHub Release одной версии.
 
 ### Из исходников
 
@@ -37,7 +46,7 @@ cd openclaw-vk-workspace
 npm ci --ignore-scripts
 npm run check
 npm pack
-openclaw plugins install ./openclaw-vk-vk-workspace-0.1.0.tgz
+openclaw plugins install ./openclaw-vk-vk-workspace-0.1.1.tgz
 openclaw plugins enable vk-workspace
 ```
 
@@ -285,16 +294,16 @@ npm run install:host   # изолированная установка закр�
 npm run check:host     # загрузка архива и проверка контрактов настоящего SDK
 ```
 
-`src/` содержит код, `test/` — тесты, `scripts/` — сборку, проверки и обслуживание очереди. Правила изменений описаны в [AGENTS.md](AGENTS.md).
+`src/` содержит код, `test/` — тесты, `scripts/` — сборку, проверки и обслуживание очереди. Пользовательские действия и ожидаемые результаты собраны в [docs/scenarios.md](docs/scenarios.md), правила изменений — в [AGENTS.md](AGENTS.md).
 
 CI запускается на PR и изменениях `main`. Для релиза обновите версии в `package.json`, `package-lock.json`, `openclaw.plugin.json` и [CHANGELOG.md](CHANGELOG.md). После проверок и merge создайте тег на проверенном коммите `main`:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-Workflow проверяет принадлежность коммита `main`, версии и CHANGELOG, повторяет тесты и SDK-проверку, затем создаёт GitHub Release с `.tgz` и `SHA256SUMS`. Actions закреплены полными SHA; существующий релиз не перезаписывается. Токен VK Teams и `NPM_TOKEN` для сборки не нужны. Автоматической npm-публикации нет.
+Workflow проверяет принадлежность коммита `main`, совпадение версий и CHANGELOG, повторяет тесты и SDK-проверку, публикует пакет в npm через Trusted Publishing, затем создаёт GitHub Release с тем же `.tgz` и `SHA256SUMS`. npm добавляет provenance автоматически. Actions закреплены полными SHA; существующие npm-версии и GitHub Releases не перезаписываются. Токен VK Teams и постоянный `NPM_TOKEN` не нужны.
 
 ## Источники и лицензия
 

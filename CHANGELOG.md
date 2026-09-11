@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.1] - 2026-09-11
+
+### Added
+
+- Published the plugin as the public npm package `@openclaw-vk/vk-workspace` in the existing `openclaw-vk` organization.
+- Added npm Trusted Publishing from GitHub Actions with short-lived OIDC credentials and automatic provenance; no long-lived `NPM_TOKEN` is required.
+
+### Improved
+
+- Updated `actions/checkout` to 7.0.1, `actions/setup-node` to 7.0.0 and `actions/upload-artifact` to 7.0.1 through the merged Dependabot pull requests.
+- Release validation now requires the versions in `package.json`, `package-lock.json` and `openclaw.plugin.json` to match before publication.
+- Documented direct npm installation as the primary installation path and retained checksummed GitHub archives as an alternative.
+
+### Scope
+
+- No channel runtime behavior changed. A stable tag on a commit already merged into `main` publishes the same version to npm and creates the corresponding GitHub Release.
+
 ## [0.1.0] - 2026-09-10
 
 ### Added

@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
+const manifest = JSON.parse(await readFile('openclaw.plugin.json', 'utf8'));
 const tag = process.env.GITHUB_REF_NAME;
 assert.equal(tag, `v${pkg.version}`, 'Tag must match package.json version');
 assert.match(tag, /^v\d+\.\d+\.\d+$/, 'Only stable version tags are supported');
+assert.equal(lock.version, pkg.version, 'package-lock.json version must match package.json');
+assert.equal(lock.packages?.['']?.version, pkg.version, 'package-lock.json root version must match package.json');
+assert.equal(manifest.version, pkg.version, 'openclaw.plugin.json version must match package.json');
 const changelog = await readFile('CHANGELOG.md', 'utf8');
 const heading = `## [${pkg.version}]`;
 const start = changelog.indexOf(heading);
