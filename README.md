@@ -233,7 +233,7 @@ openclaw pairing approve vk-workspace <code>
 { "mediaAllowedOrigins": ["https://files.example.com"] }
 ```
 
-Например, инсталляция Lesta, возвращающая ссылки с `files-n.lesta.group`, требует точного значения `"https://files-n.lesta.group"`. Плагин не доверяет домену только по имени или суффиксу.
+Плагин не доверяет домену только по имени или суффиксу. Каждый origin в цепочке перенаправлений проверяется отдельно.
 
 Для входящего voice плагин использует MIME и имя из `files/getInfo` и HTTP-ответа. Если CDN возвращает `application/octet-stream` и имя без расширения, OGG, MP3, AAC, M4A, WAV и WebM распознаются по сигнатуре и получают имя, пригодное для multipart STT. Неопознанные данные отклоняются до обращения к провайдеру.
 

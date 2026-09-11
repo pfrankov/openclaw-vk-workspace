@@ -215,6 +215,10 @@ test('inbound voice derives provider-safe OGG metadata from bytes when the CDN i
   assert.equal(media[0].kind, 'audio'); assert.equal(media[0].contentType, 'audio/ogg');
 });
 test('voice normalization recognizes common audio signatures and rejects unknown bytes', () => {
+  assert.deepEqual(normalizeVoiceMedia({ buffer: Buffer.from('opaque audio'), fileName: 'voice.aac', contentType: 'application/octet-stream' }),
+    { contentType: 'audio/aac', fileName: 'voice.aac' });
+  assert.deepEqual(normalizeVoiceMedia({ buffer: Buffer.from([0xff, 0xf1, 0x50, 0x80]), fileName: 'opaque', contentType: 'application/octet-stream' }),
+    { contentType: 'audio/aac', fileName: 'opaque.aac' });
   assert.deepEqual(normalizeVoiceMedia({ buffer: Buffer.from('ID3audio'), fileName: 'opaque', contentType: 'application/octet-stream' }),
     { contentType: 'audio/mpeg', fileName: 'opaque.mp3' });
   assert.throws(() => normalizeVoiceMedia({ buffer: Buffer.from('unknown'), fileName: 'opaque', contentType: 'application/octet-stream' }),
@@ -230,13 +234,14 @@ test('voice normalization canonicalizes MIME aliases and ignores unknown audio t
 test('untrusted inbound CDN reports a safe actionable origin without its signed URL', async () => {
   const { core } = installRuntime(); const a = account();
   await assert.rejects(inboundMedia([{ type: 'voice', payload: { fileId: 'voice-id' } }], { account: a, core, api: {
-    getFileInfo: async () => ({ url: 'https://files-n.lesta.group/path?signature=DO-NOT-LOG' }),
+    getFileInfo: async () => ({ url: 'https://private-files.example/path?signature=DO-NOT-LOG' }),
   } }), (error) => error.stage === 'media-download' && error.code === 'untrusted-origin' &&
-    error.message.includes('https://files-n.lesta.group') && !error.message.includes('DO-NOT-LOG'));
+    error.message.includes('https://private-files.example') && !error.message.includes('DO-NOT-LOG'));
 });
 test('attachment count and metadata size limits are enforced before download', async () => {
   const { core } = installRuntime(); const a = account(); const file = { type: 'file', payload: { fileId: 'f' } };
-  await assert.rejects(inboundMedia(Array(11).fill(file), { account: a, core, api: {} }), /At most 10/);
+  await assert.rejects(inboundMedia(Array(11).fill(file), { account: a, core, api: {} }),
+    (error) => error.stage === 'media-metadata' && error.code === 'attachment-limit' && /At most 10/.test(error.message));
   await assert.rejects(inboundMedia([file], { account: a, core, api: { getFileInfo: async () => ({ url: 'https://teams.example/f', size: 1000000000 }) } }), /size limit/);
   assert.equal(safeFileName('../../private\\name.txt'), 'name.txt');
 });

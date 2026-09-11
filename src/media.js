@@ -9,7 +9,7 @@ const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown',
   '.json': 'application/json', '.csv': 'text/csv', '.ogg': 'audio/ogg', '.opus': 'audio/opus',
   '.aac': 'audio/aac', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.wav': 'audio/wav', '.zip': 'application/zip' };
-const AUDIO_EXTENSION = { 'audio/ogg': '.ogg', 'audio/opus': '.opus', 'audio/aac': '.m4a',
+const AUDIO_EXTENSION = { 'audio/ogg': '.ogg', 'audio/opus': '.opus', 'audio/aac': '.aac',
   'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/wav': '.wav', 'audio/webm': '.webm' };
 const AUDIO_MIME_ALIAS = { 'application/ogg': 'audio/ogg', 'audio/mp3': 'audio/mpeg',
   'audio/x-aac': 'audio/aac', 'audio/x-m4a': 'audio/mp4', 'audio/x-mpeg': 'audio/mpeg',
@@ -150,7 +150,8 @@ export async function loadOutboundMedia(input, { account, core, mediaLocalRoots,
 
 export async function inboundMedia(parts, { api, account, core, signal }) {
   const files = parts.filter((part) => ['file', 'voice', 'sticker'].includes(part?.type) && typeof part.payload?.fileId === 'string');
-  if (files.length > 10) throw new Error('At most 10 attachments per message are supported');
+  if (files.length > 10) throw new ProcessingFailure('media-metadata', 'attachment-limit',
+    'At most 10 attachments per message are supported');
   const media = [];
   for (const part of files) {
     let info;

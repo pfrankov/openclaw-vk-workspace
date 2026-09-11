@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Incoming voice files with generic CDN metadata now derive a provider-safe MIME type and extension from OGG, MP3, AAC, M4A, WAV or WebM content before OpenClaw STT.
+- Incoming voice files with generic CDN metadata now preserve `.aac` as `audio/aac` or derive a provider-safe MIME type and extension from OGG, MP3, AAC, M4A, WAV or WebM content before OpenClaw STT.
 - Failed inbox entries now retain a bounded, secret-safe processing stage, code and actionable message instead of only `processing-failed`.
 - Disallowed file CDN origins identify the exact safe origin and required `mediaAllowedOrigins` setting without persisting the signed download URL.
 - Audio failures after media storage are distinguished from download and normalization failures, while raw provider errors remain confined to Gateway provider logs.

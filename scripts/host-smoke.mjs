@@ -54,6 +54,13 @@ try {
     mime: normalizedVoice.contentType, fields: { model: 'test-transcriber' } });
   assert.equal(transcriptionForm.get('file').name, 'opaque.ogg');
   assert.equal(transcriptionForm.get('file').type, 'audio/ogg');
+  const normalizedAac = normalizeVoiceMedia({ buffer: Buffer.from([0xff, 0xf1, 0x50, 0x80]), fileName: 'voice',
+    contentType: 'application/octet-stream' });
+  assert.deepEqual(normalizedAac, { contentType: 'audio/aac', fileName: 'voice.aac' });
+  const aacForm = buildAudioTranscriptionFormData({ buffer: Buffer.from('opaque audio'), fileName: normalizedAac.fileName,
+    mime: normalizedAac.contentType, fields: { model: 'test-transcriber' } });
+  assert.equal(aacForm.get('file').name, 'voice.m4a');
+  assert.equal(aacForm.get('file').type, 'audio/aac');
   const sent = [];
   await handleInbound({ event: event(), self: { userId: 'bot@example.com' }, account: resolveAccount(cfg), cfg,
     api: { sendTyping: async () => {}, sendText: async (chatId, text) => { sent.push({ chatId, text }); return { chatId, messageId: 'r' }; } } });

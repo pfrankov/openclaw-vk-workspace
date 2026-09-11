@@ -79,10 +79,10 @@ test('drain runs chats concurrently, preserves FIFO within each and retains fail
 test('failed events retain only safe stage diagnostics and clear them before explicit retry', async (t) => {
   const inbox = await makeInbox(t); await inbox.ingest([event(58)]); let reported;
   await drainInbox({ inbox, handle: async () => { throw new ProcessingFailure('media-download', 'untrusted-origin',
-    'Media download failed: origin https://files-n.lesta.group is not allowed; add it to mediaAllowedOrigins'); },
+    'Media download failed: origin https://private-files.example is not allowed; add it to mediaAllowedOrigins'); },
   onFailure: (id, failure) => { reported = { id, failure }; } });
   assert.deepEqual(reported, { id: '58', failure: { stage: 'media-download', code: 'untrusted-origin',
-    message: 'Media download failed: origin https://files-n.lesta.group is not allowed; add it to mediaAllowedOrigins' } });
+    message: 'Media download failed: origin https://private-files.example is not allowed; add it to mediaAllowedOrigins' } });
   assert.deepEqual(inbox.state.failed[0].failure, reported.failure);
   await inbox.retryFailed(); assert.equal(inbox.state.pending[0].failure, undefined);
 });
