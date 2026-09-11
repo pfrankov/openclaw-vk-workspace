@@ -87,7 +87,8 @@ export async function loadOutboundMedia(input, { account, core, mediaLocalRoots,
     try { trustedMediaUrl(input, account); trusted = true; } catch { /* Public URLs use core SSRF policy. */ }
     if (trusted) result = await downloadTrusted(input, account, signal);
     else {
-      try { result = await core.channel.media.fetchRemoteMedia({ url: input, maxBytes: maxBytesFor(account) }); }
+      try { result = await core.channel.media.fetchRemoteMedia({ url: input, maxBytes: maxBytesFor(account),
+        ...(signal ? { requestInit: { signal } } : {}) }); }
       catch { throw new Error('Remote media was blocked or could not be downloaded'); }
     }
   } else {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolveAccount, inspectAccount, listAccountIds, normalizeBaseUrl, validate, matchesAllowFrom, channelSchema } from '../src/config.js';
 import { setupPlugin } from '../src/channel-setup.js';
@@ -54,6 +54,15 @@ test('tokenFile precedence, errors and cold inspection never expose or read file
   await writeFile(file, ''); assert.throws(() => resolveAccount(cfg), /empty/);
   assert.throws(() => resolveAccount({ channels: { 'vk-workspace': { tokenFile: '/missing' } } }, undefined, { env: { VK_WORKSPACE_BOT_TOKEN: 'fallback' } }), /Cannot read/);
 });
+test('tokenFile must be absolute, regular, bounded and not a symlink', async (t) => {
+  const dir = await tempDir(t); const file = join(dir, 'token'); const link = join(dir, 'token-link'); const folder = join(dir, 'folder');
+  await writeFile(file, 'secret'); await symlink(file, link); await mkdir(folder);
+  const withFile = (tokenFile) => ({ channels: { 'vk-workspace': { tokenFile } } });
+  assert.throws(() => resolveAccount(withFile('relative.token')), /absolute/);
+  for (const tokenFile of [link, folder]) assert.throws(() => resolveAccount(withFile(tokenFile)), /Cannot read/);
+  await writeFile(file, 'x'.repeat(64 * 1024 + 1));
+  assert.throws(() => resolveAccount(withFile(file)), /Cannot read/);
+});
 test('root disabled flag dominates account enabled flag', () => {
   assert.equal(resolveAccount(config({ enabled: false, accounts: { work: { enabled: true, botToken: 'work' } } }), 'work').enabled, false);
 });
@@ -71,6 +80,9 @@ test('setup replaces tokenFile with token and preserves URL and sibling accounts
   const next = setupPlugin.setup.applyAccountConfig({ cfg, accountId: 'work', input: { token: 'new' } });
   assert.equal(resolveAccount(next, 'work').token, 'new'); assert.equal(next.channels['vk-workspace'].accounts.work.tokenFile, undefined);
   assert.equal(resolveAccount(next, 'other').token, 'other'); assert.equal(resolveAccount(next, 'work').baseUrl, 'https://teams.example/bot/v1');
+});
+test('setup rejects a relative tokenFile before writing configuration', () => {
+  assert.match(setupPlugin.setup.validateInput({ accountId: 'default', input: { tokenFile: 'relative.token' } }), /absolute/);
 });
 test('cold setup uses exactly the manifest-owned runtime schema', () => assert.deepEqual(setupPlugin.configSchema.schema, channelSchema));
 test('disabling or deleting the default account does not disable named accounts', () => {

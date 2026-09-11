@@ -7,6 +7,12 @@ import { drainInbox, monitorAccount } from '../src/monitor.js';
 import { ApiError } from '../src/api.js';
 import { event, account, tempDir, config } from './helpers.js';
 
+const statusSdk = {
+  channelReadyPatch: (extras = {}) => ({ running: true, connected: true, lifecycle: 'ready', lastError: null, ...extras }),
+  channelStoppedPatch: (extras = {}) => ({ running: false, connected: false, lifecycle: 'stopped', ...extras }),
+  transportActivityPatch: (at) => ({ lastTransportActivityAt: at }),
+};
+
 async function makeInbox(t) {
   const inbox = await new Inbox(join(await tempDir(t), 'inbox.json')).open();
   t.after(() => inbox.close()); return inbox;
@@ -83,19 +89,21 @@ test('monitor readiness follows the actual first poll; its events are delivered 
   } };
   const delivered = [];
   await monitorAccount({ account: account(), cfg: config(), abortSignal: controller.signal, setStatus: (x) => statuses.push(x) },
-    { core: {}, api, inbox: new Inbox(path), handle: async ({ event: item }) => delivered.push(item.eventId) });
+    { core: {}, sdk: statusSdk, api, inbox: new Inbox(path), handle: async ({ event: item }) => delivered.push(item.eventId) });
   assert.deepEqual(delivered, ['5']); assert.equal(calls[0].pollTime, 1); assert.equal(calls[1].pollTime, 30);
-  assert(statuses.some((x) => x.connected === true)); assert.equal(statuses.at(-1).running, false);
+  const ready = statuses.find((x) => x.lifecycle === 'ready');
+  assert.equal(ready.connected, true); assert.equal(ready.lastTransportActivityAt, ready.lastEventAt);
+  assert.equal(statuses.at(-1).running, false); assert.equal(statuses.at(-1).lifecycle, 'stopped');
 });
 test('monitor transient poll failure never reports connected and can be cancelled during backoff', async (t) => {
   const controller = new AbortController(); const statuses = []; const timer = setTimeout(() => controller.abort(), 30); t.after(() => clearTimeout(timer));
   await monitorAccount({ account: account(), cfg: config(), abortSignal: controller.signal, setStatus: (x) => statuses.push(x) },
-    { core: {}, inbox: new Inbox(join(await tempDir(t), 'state.json')), api: { getSelf: async () => ({ userId: 'bot' }), getEvents: async () => { throw new ApiError('events/get', 'network request failed'); } } });
+    { core: {}, sdk: statusSdk, inbox: new Inbox(join(await tempDir(t), 'state.json')), api: { getSelf: async () => ({ userId: 'bot' }), getEvents: async () => { throw new ApiError('events/get', 'network request failed'); } } });
   assert(!statuses.some((x) => x.connected)); assert.equal(statuses.at(-1).running, false);
 });
 test('storage failure stops the monitor before any next poll acknowledges unpersisted events', async (t) => {
   const path = join(await tempDir(t), 'state.json'); let polls = 0;
-  await assert.rejects(monitorAccount({ account: account(), cfg: config() }, { core: {}, inbox: new Inbox(path), api: {
+  await assert.rejects(monitorAccount({ account: account(), cfg: config() }, { core: {}, sdk: statusSdk, inbox: new Inbox(path), api: {
     getSelf: async () => ({ userId: 'bot' }), getEvents: async () => { polls++; return [event('invalid-id')]; },
   } }), /monitor failed/);
   assert.equal(polls, 1);

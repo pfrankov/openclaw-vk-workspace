@@ -1,8 +1,10 @@
-import { readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 
 export const CHANNEL_ID = 'vk-workspace';
 export const DEFAULT_ACCOUNT_ID = 'default';
 export const DEFAULT_BASE_URL = 'https://api.internal.myteam.mail.ru/bot/v1';
+const TOKEN_FILE_MAX_BYTES = 64 * 1024;
 export const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 export const normalizeId = (value) => String(value ?? '').trim().replace(/^vk-workspace:(?:user:|chat:)?/i, '');
 const string = { type: 'string' };
@@ -41,6 +43,30 @@ export const uiHints = {
   tokenFile: { label: 'Bot token file' },
   'accounts.*.botToken': { label: 'Bot API token', sensitive: true },
 };
+
+function readTokenFile(path) {
+  if (!isAbsolute(path)) throw new Error('VK Workspace tokenFile must be an absolute path');
+  let fd;
+  try {
+    if (lstatSync(path).isSymbolicLink()) throw new Error('invalid token file');
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > TOKEN_FILE_MAX_BYTES) throw new Error('invalid token file');
+    const buffer = Buffer.allocUnsafe(TOKEN_FILE_MAX_BYTES + 1);
+    let bytes = 0;
+    while (bytes < buffer.length) {
+      const count = readSync(fd, buffer, bytes, buffer.length - bytes, bytes);
+      if (!count) break;
+      bytes += count;
+    }
+    if (bytes > TOKEN_FILE_MAX_BYTES) throw new Error('invalid token file');
+    return buffer.toString('utf8', 0, bytes).trim();
+  } catch {
+    throw new Error('Cannot read VK Workspace tokenFile');
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
 
 // Keep runtime validation equivalent to the manifest without pulling in a schema library.
 export function validate(value, schema = channelSchema, path = `channels.${CHANNEL_ID}`) {
@@ -119,9 +145,9 @@ export function resolveAccount(cfg, requestedId, { env = process.env, readToken 
   let tokenSource = token ? 'config' : 'none';
   if (credentials.tokenFile) {
     tokenSource = 'file';
+    if (!isAbsolute(credentials.tokenFile)) throw new Error('VK Workspace tokenFile must be an absolute path');
     if (readToken) {
-      try { token = readFileSync(credentials.tokenFile, 'utf8').trim(); }
-      catch { throw new Error('Cannot read VK Workspace tokenFile'); }
+      token = readTokenFile(credentials.tokenFile);
       if (!token) throw new Error('VK Workspace tokenFile is empty');
     }
   } else if (!token && accountId === DEFAULT_ACCOUNT_ID && !own) {

@@ -79,10 +79,15 @@ export function installRuntime({ cfg = config(), payloads = [{ text: 'Ответ
     },
     mediaFacts: (media) => media, replyPrefix: () => ({}), mediaRoots: () => mediaRoots,
     audioPreflight: {
-      resolve: async ({ request }) => { seen.preflights.push(request); if (audioTranscript && request.ctx.media[0]) request.ctx.media[0].transcribed = true; return audioTranscript; },
+      resolve: async ({ request }) => { seen.preflights.push(request); if (audioTranscript) request.ctx.media = request.ctx.media.map((item, index) =>
+        index === 0 ? { ...item, transcribed: true } : item); return audioTranscript; },
       send: async (params) => { seen.transcriptEchoes.push(params); },
     },
     formatAudioTranscript: (transcript) => `[Audio transcript (machine-generated, untrusted)]: ${JSON.stringify(transcript)}`,
+    channelReadyPatch: (extras = {}) => ({ running: true, connected: true, lifecycle: 'ready',
+      lastConnectedAt: Date.now(), lastError: null, terminalDisconnect: undefined, ...extras }),
+    channelStoppedPatch: (extras = {}) => ({ running: false, connected: false, lifecycle: 'stopped', ...extras }),
+    transportActivityPatch: (at = Date.now()) => ({ lastTransportActivityAt: at }),
   };
   setRuntime(core, sdk);
   return { core, sdk, seen };

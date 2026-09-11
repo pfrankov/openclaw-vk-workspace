@@ -1,5 +1,6 @@
 import { CHANNEL_ID, channelSchema, uiHints, listAccountIds, defaultAccountId, resolveAccount,
   inspectAccount, normalizeId, editAccount, sectionOf } from './config.js';
+import { isAbsolute } from 'node:path';
 
 export const meta = {
   id: CHANNEL_ID, label: 'VK Workspace', selectionLabel: 'VK Workspace (VK Teams Bot)',
@@ -43,6 +44,7 @@ export const setupPlugin = {
       if (input.useEnv) return accountId !== 'default' ? 'Environment credentials are only available to the default account.'
         : process.env.VK_WORKSPACE_BOT_TOKEN?.trim() ? null : 'Set VK_WORKSPACE_BOT_TOKEN before using --use-env.';
       if (input.token && input.tokenFile) return 'Set token or tokenFile, not both.';
+      if (input.tokenFile?.trim() && !isAbsolute(input.tokenFile.trim())) return 'tokenFile must be an absolute path.';
       return input.token?.trim() || input.tokenFile?.trim() ? null : 'A bot token or tokenFile is required.';
     },
     applyAccountConfig: ({ cfg, accountId, input }) => {
