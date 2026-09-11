@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.7] - 2026-09-11
+
+### Fixed
+
+- Audio preflight now preserves OpenClaw's `transcribed` media fact, preventing duplicate transcription after a spoken mention.
+- Mention-gated preflight accepts exactly one voice attachment and never downloads mixed voice/file/sticker messages before an explicit mention.
+- Unsafe numeric inbound message and reply IDs are rejected while opaque signed-int64 strings remain exact.
+- Successful polls now publish canonical ready and transport-activity status; stopped and recovering lifecycle states are explicit.
+- Public outbound media downloads receive the turn abort signal.
+- `tokenFile` must be an absolute, regular, non-symlink file no larger than 64 KiB.
+- The real-SDK smoke test now carries the registered `/models` menu through the VK Workspace HTTP keyboard parameter and back through its callback command.
+
+### Scope
+
+- Plugin updates remain explicit on each Gateway; publishing a newer npm version does not replace an installed plugin process.
+
 ## [0.1.6] - 2026-09-11
 
 ### Fixed

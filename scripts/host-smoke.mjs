@@ -69,15 +69,18 @@ try {
     const localAccount = resolveAccount(localCfg);
     const api = new TeamsApi(localAccount);
     const to = 'user@example.com';
-    const result = await sendPayload(to, { text: '**Choose**', channelData: { 'vk-workspace': {
-      buttons: [[{ text: 'Continue', callbackData: 'Continue' }]],
-    } } }, { cfg: localCfg, account: localAccount, core, api, requesterSenderId: to });
+    const modelsChannelData = registered.commands.buildModelsMenuChannelData({ providers: [{ id: 'openai', count: 2 }] });
+    const result = await sendPayload(to, { text: '**Choose**', channelData: modelsChannelData },
+      { cfg: localCfg, account: localAccount, core, api, requesterSenderId: to });
     assert.equal(requests.at(-1).searchParams.get('text'), '<b>Choose</b>');
-    const token = JSON.parse(requests.at(-1).searchParams.get('inlineKeyboardMarkup'))[0][0].callbackData;
+    const keyboard = JSON.parse(requests.at(-1).searchParams.get('inlineKeyboardMarkup'));
+    assert.equal(keyboard[0][0].text, 'openai (2)');
+    const token = keyboard[0][0].callbackData;
     const click = { eventId: 100, type: 'callbackQuery', payload: { queryId: 'q1', from: { userId: to }, callbackData: token,
       message: { msgId: result.messageId, from: { userId: 'bot@example.com' }, chat: { chatId: to, type: 'private' } } } };
     await handleInbound({ event: click, self: { userId: 'bot@example.com' }, account: localAccount, cfg: localCfg, api });
     assert.equal(seen.dispatches, 2);
+    assert.equal(seen.contexts.at(-1).CommandBody, '/models openai');
     await handleInbound({ event: click, self: { userId: 'bot@example.com' }, account: localAccount, cfg: localCfg, api });
     assert.equal(seen.dispatches, 2);
     await registered.actions.handleAction({ action: 'edit', cfg: localCfg, accountId: 'default',

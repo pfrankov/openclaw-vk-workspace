@@ -4,6 +4,9 @@ import { getRuntime } from './runtime.js';
 import { sendPayload } from './send.js';
 import { getMessageStore } from './message-store.js';
 
+const validMessageId = (value) => typeof value === 'number' ? Number.isSafeInteger(value)
+  : typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\x00-\x20\x7f]/.test(value);
+
 export function parseMessage(event, self) {
   if (!['newMessage', 'callbackQuery'].includes(event?.type)) return null;
   const callback = event.type === 'callbackQuery' ? event.payload : undefined;
@@ -13,12 +16,13 @@ export function parseMessage(event, self) {
       (callback.chat && callback.message.chat && (callback.chat.chatId !== callback.message.chat.chatId || callback.chat.type !== callback.message.chat.type)))) return null;
   const p = callback ? { ...callback.message, chat: callback.message.chat ?? callback.chat, from: callback.from, text: '', parts: [] } : event.payload;
   if (!isRecord(p) || typeof p.chat?.chatId !== 'string' || typeof p.from?.userId !== 'string' ||
-      !p.chat.chatId || !p.from.userId || !['string', 'number'].includes(typeof p.msgId) ||
+      !p.chat.chatId || !p.from.userId || !validMessageId(p.msgId) ||
       p.from.userId === self.userId || p.from.isBot === true) return null;
   // Missing/unknown chat types never downgrade a group into a DM.
   const isGroup = p.chat.type !== 'private';
   const parts = Array.isArray(p.parts) ? p.parts : [];
-  const reply = parts.find((part) => part?.type === 'reply')?.payload?.message;
+  const candidateReply = parts.find((part) => part?.type === 'reply')?.payload?.message;
+  const reply = validMessageId(candidateReply?.msgId) ? candidateReply : undefined;
   let text = typeof p.text === 'string' ? p.text : '';
   const forwards = parts.filter((part) => part?.type === 'forward').map((part) => part.payload?.message)
     .filter((message) => typeof message?.text === 'string');
@@ -97,19 +101,21 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
   let route;
   let media;
   let preflightTranscript;
-  const voiceOnly = !message.visibleText.trim() && message.parts.some((part) => part?.type === 'voice' && part.payload?.fileId);
+  const mediaParts = message.parts.filter((part) => ['file', 'voice', 'sticker'].includes(part?.type) && part.payload?.fileId);
+  const voiceOnly = !message.visibleText.trim() && mediaParts.length === 1 && mediaParts[0].type === 'voice';
   if (message.isGroup && access.requireMention && !mentioned && !(hasCommand && commandGate.commandAuthorized) && voiceOnly && mentionRegexes.length) {
     route = core.channel.routing.resolveAgentRoute({ cfg, channel: CHANNEL_ID, accountId: account.accountId,
       peer: { kind: 'group', id: message.chatId } });
     media = await inboundMedia(message.parts, { api, account, core, signal });
     const mediaFacts = sdk.mediaFacts(media, { messageId: message.messageId });
+    const preflightCtx = { Provider: CHANNEL_ID, Surface: CHANNEL_ID, OriginatingChannel: CHANNEL_ID,
+      OriginatingTo: `${CHANNEL_ID}:${message.chatId}`, AccountId: account.accountId, media: mediaFacts };
     preflightTranscript = await sdk.audioPreflight.resolve({ abortSignal: signal, request: { cfg,
-      ctx: { Provider: CHANNEL_ID, Surface: CHANNEL_ID, OriginatingChannel: CHANNEL_ID,
-        OriginatingTo: `${CHANNEL_ID}:${message.chatId}`, AccountId: account.accountId, media: mediaFacts } } });
+      ctx: preflightCtx } });
     mentioned = Boolean(preflightTranscript && core.channel.mentions.matchesMentionPatterns(preflightTranscript, mentionRegexes));
     if (mentioned) {
       message.text = sdk.formatAudioTranscript(preflightTranscript);
-      media = mediaFacts;
+      media = preflightCtx.media;
     }
   }
   if (message.isGroup && access.requireMention && !mentioned && !(hasCommand && commandGate.commandAuthorized)) return;

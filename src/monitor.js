@@ -41,13 +41,16 @@ export async function drainInbox({ inbox, handle, signal, onFailure }) {
 export async function monitorAccount(ctx, deps = {}) {
   const account = ctx.account;
   if (!account.enabled || !account.token) throw new Error('VK Workspace account is disabled or its bot token is missing');
-  const core = deps.core ?? getRuntime().core;
+  const runtime = deps.core && deps.sdk ? undefined : getRuntime();
+  const core = deps.core ?? runtime.core;
+  const sdk = deps.sdk ?? runtime.sdk;
   const api = deps.api ?? new TeamsApi(account);
   const inbox = deps.inbox ?? new Inbox(inboxPath(resolveStateDir(core), account));
   const signal = ctx.abortSignal;
   const setStatus = (patch) => ctx.setStatus?.({ accountId: account.accountId, ...patch });
   const log = (message) => ctx.log?.warn?.(message);
-  setStatus({ running: true, connected: false, lastStartAt: Date.now(), lastError: null });
+  setStatus({ running: true, connected: false, lifecycle: 'starting', lastStartAt: Date.now(),
+    lastConnectedAt: null, lastEventAt: null, lastTransportActivityAt: null, lastError: null });
   let opened = false;
   let ready = false;
   let failures = 0;
@@ -61,7 +64,7 @@ export async function monitorAccount(ctx, deps = {}) {
       catch (error) {
         if (signal?.aborted) break;
         if (!(error instanceof ApiError)) throw error;
-        setStatus({ connected: false, lastError: error.message });
+        setStatus({ connected: false, lifecycle: 'recovering', lastError: error.message });
         log(error.message);
         await (deps.delay ?? delay)(Math.min(30000, 1000 * 2 ** Math.min(failures++, 5)), undefined, { signal });
       }
@@ -81,14 +84,16 @@ export async function monitorAccount(ctx, deps = {}) {
         await inbox.ingest(events); // Persist before the next poll acknowledges lastEventId.
         failures = 0;
         ready = true;
-        setStatus({ connected: true, lastConnectedAt: Date.now(), lastEventAt: Date.now(),
-          lastError: inbox.state.failed.length ? 'Failed deliveries retained in durable inbox' : null });
+        const now = Date.now();
+        setStatus(sdk.channelReadyPatch({ lastConnectedAt: now, lastEventAt: now,
+          ...sdk.transportActivityPatch(now),
+          lastError: inbox.state.failed.length ? 'Failed deliveries retained in durable inbox' : null }));
         if (!events.length) await delay(250, undefined, { signal }); // Avoid a busy loop on non-blocking servers.
       } catch (error) {
         if (signal?.aborted) break;
         // Storage/validation errors fail closed; never fetch-and-ack a batch we could not persist.
         if (!(error instanceof ApiError)) throw error;
-        setStatus({ connected: false, lastError: error.message });
+        setStatus({ connected: false, lifecycle: 'recovering', lastError: error.message });
         log(error.message);
         const backoff = Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
         await delay(backoff, undefined, { signal });
@@ -102,6 +107,6 @@ export async function monitorAccount(ctx, deps = {}) {
     }
   } finally {
     if (opened) await inbox.close();
-    setStatus({ running: false, connected: false, lastStopAt: Date.now() });
+    setStatus(sdk.channelStoppedPatch({ lastStopAt: Date.now() }));
   }
 }

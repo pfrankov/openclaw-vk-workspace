@@ -4,7 +4,7 @@ import { writeFile, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chunkText, sendPayload } from '../src/send.js';
 import { parseMessage, checkAccess, handleInbound } from '../src/inbound.js';
-import { trustedMediaUrl, downloadTrusted, readLocalMedia, inboundMedia, safeFileName } from '../src/media.js';
+import { trustedMediaUrl, downloadTrusted, readLocalMedia, loadOutboundMedia, inboundMedia, safeFileName } from '../src/media.js';
 import { TeamsApi } from '../src/api.js';
 import { resolveAccount } from '../src/config.js';
 import { config, account, event, tempDir, httpServer, installRuntime } from './helpers.js';
@@ -38,6 +38,13 @@ test('native mention and reply-to-bot detection, attachment-only and forwarded c
   assert.equal(parseMessage(event(1, { text: '', parts: [{ type: 'voice', payload: { fileId: 'f' } }] }), self).text, '[Attachment]');
   const forward = parseMessage(groupEvent({ parts: [{ type: 'forward', payload: { message: { text: `@[${self.userId}] original` } } }] }), self);
   assert.equal(forward.wasMentioned, false); assert.match(forward.text, /Forwarded message/);
+});
+test('message and reply ids preserve opaque int64 strings and reject unsafe JSON numbers', () => {
+  assert.equal(parseMessage(event(1, { msgId: '9223372036854775807' }), self).messageId, '9223372036854775807');
+  assert.equal(parseMessage(event(1, { msgId: 9007199254740992 }), self), null);
+  const invalidReply = parseMessage(groupEvent({ parts: [{ type: 'reply', payload: { message: {
+    msgId: 9007199254740992, from: { userId: self.userId }, text: 'unsafe' } } }] }), self);
+  assert.equal(invalidReply.reply, undefined); assert.equal(invalidReply.wasMentioned, false);
 });
 test('group allowlist requires BOTH approved chat and approved sender; DM approvals do not count', () => {
   const message = parseMessage(groupEvent(), self);
@@ -99,6 +106,17 @@ test('voice preflight without a spoken mention does not start an agent turn or e
     self, cfg, account: resolveAccount(cfg), api: new TeamsApi(resolveAccount(cfg)) });
   assert.equal(seen.preflights.length, 1); assert.equal(seen.dispatches, 0);
   assert.equal(seen.sessions.length, 0); assert.equal(seen.transcriptEchoes.length, 0);
+});
+test('voice preflight refuses mixed attachment messages before every download', async () => {
+  const cfg = config({ groupPolicy: 'allowlist', groupAllowFrom: ['user@example.com'],
+    groups: { '123@chat.agent': { requireMention: true } } });
+  const { seen } = installRuntime({ cfg, mentionPatterns: [/openclaw/i], audioTranscript: 'OpenClaw' });
+  for (const extra of ['file', 'sticker']) {
+    await handleInbound({ event: groupEvent({ text: '', parts: [
+      { type: 'voice', payload: { fileId: 'voice-id' } }, { type: extra, payload: { fileId: 'extra-id' } },
+    ] }), self, cfg, account: resolveAccount(cfg), api: { getFileInfo: () => assert.fail('must not download') } });
+  }
+  assert.equal(seen.preflights.length, 0); assert.equal(seen.dispatches, 0); assert.equal(seen.routes.length, 0);
 });
 test('open chat access does not authorize unallowlisted control commands', async () => {
   const cfg = config({ dmPolicy: 'open' }); const { seen } = installRuntime({ cfg });
@@ -163,6 +181,13 @@ test('media origins block credentials, other origins and unapproved redirect des
   const server = await httpServer(t, (_, res) => { res.statusCode = 302; res.setHeader('Location', 'http://169.254.169.254/credentials'); res.end(); });
   await assert.rejects(downloadTrusted(`${server.origin}/f`, server.account), /download failed/);
   assert.equal(server.requests.length, 1);
+});
+test('public outbound media delegates the turn abort signal to the host SSRF fetcher', async () => {
+  const controller = new AbortController(); let options;
+  const core = { channel: { media: { fetchRemoteMedia: async (value) => { options = value; return {
+    buffer: Buffer.from('ok'), fileName: 'file.txt', contentType: 'text/plain' }; } } } };
+  await loadOutboundMedia('https://public.example/file.txt', { account: account(), core, signal: controller.signal });
+  assert.equal(options.requestInit.signal, controller.signal);
 });
 test('inbound attachment uses files/getInfo, materializes bytes and never exposes signed URL in media facts', async (t) => {
   let origin;
