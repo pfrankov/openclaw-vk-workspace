@@ -33,3 +33,40 @@ export function prepareKeyboard(buttons, ownerId, now = Date.now()) {
   }));
   return { keyboard, callbacks };
 }
+
+const channelData = (buttons) => buttons?.length ? { 'vk-workspace': { buttons } } : null;
+const buttonLabel = (text) => {
+  const chars = Array.from(String(text).trim());
+  return chars.length <= 60 ? chars.join('') : `${chars.slice(0, 59).join('')}…`;
+};
+const commandButton = (text, callbackData, style = 'base') =>
+  Buffer.byteLength(callbackData) <= 256 ? { text: buttonLabel(text), callbackData, style } : null;
+export function buildModelsProviderChannelData({ providers }) {
+  const rows = [];
+  for (const provider of providers.slice(0, 20)) {
+    const row = rows.at(-1);
+    const button = commandButton(`${provider.id} (${provider.count})`, `/models ${provider.id}`, 'primary');
+    if (!button) continue;
+    if (!row || row.length >= 2) rows.push([button]); else row.push(button);
+  }
+  return channelData(rows);
+}
+export function buildModelsListChannelData({ provider, models, currentModel, currentPage, totalPages, pageSize = 8, modelNames }) {
+  const start = (currentPage - 1) * pageSize;
+  const rows = models.slice(start, start + pageSize).flatMap((model) => {
+    const full = `${provider}/${model}`;
+    const selected = currentModel === model || currentModel === full;
+    const button = commandButton(`${modelNames?.get(full) ?? model}${selected ? ' ✓' : ''}`, `/model ${full}`, selected ? 'attention' : 'primary');
+    return button ? [[button]] : [];
+  });
+  const navigation = [];
+  if (currentPage > 1) navigation.push(commandButton('◀ Назад', `/models list ${provider} ${currentPage - 1}`));
+  if (currentPage < totalPages) navigation.push(commandButton('Вперёд ▶', `/models list ${provider} ${currentPage + 1}`));
+  const validNavigation = navigation.filter(Boolean);
+  if (validNavigation.length) rows.push(validNavigation);
+  rows.push([commandButton('Все провайдеры', '/models')]);
+  return channelData(rows);
+}
+export function buildModelBrowseChannelData() {
+  return channelData([[commandButton('Выбрать модель', '/models', 'primary')]]);
+}

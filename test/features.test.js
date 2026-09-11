@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { formatText, safeLink } from '../src/format.js';
-import { normalizeButtons, prepareKeyboard, CALLBACK_TTL_MS } from '../src/keyboard.js';
+import { buildModelBrowseChannelData, buildModelsListChannelData, buildModelsProviderChannelData,
+  normalizeButtons, prepareKeyboard, CALLBACK_TTL_MS } from '../src/keyboard.js';
 import { MessageStore, getMessageStore, messageStorePath } from '../src/message-store.js';
 import { channelData, sendPayload, editMessage } from '../src/send.js';
 import { TeamsApi, ApiError } from '../src/api.js';
@@ -21,6 +22,26 @@ const USER = 'user@example.com';
 const BOT = { userId: 'bot@example.com' };
 const buttons = [[{ text: 'Продолжить', callbackData: 'Продолжить', style: 'primary' }]];
 const dataPayload = (data, text = 'Выберите') => ({ text, channelData: { [ID]: data } });
+
+test('native OpenClaw model menus produce provider, model, pagination and browse buttons', () => {
+  assert.equal(channelPlugin.commands.buildModelsMenuChannelData, buildModelsProviderChannelData);
+  assert.equal(channelPlugin.commands.buildModelsListChannelData, buildModelsListChannelData);
+  assert.deepEqual(buildModelsProviderChannelData({ providers: [{ id: 'openai', count: 3 }, { id: 'anthropic', count: 2 }] }), {
+    [ID]: { buttons: [[
+      { text: 'openai (3)', callbackData: '/models openai', style: 'primary' },
+      { text: 'anthropic (2)', callbackData: '/models anthropic', style: 'primary' },
+    ]] },
+  });
+  assert.deepEqual(buildModelsListChannelData({ provider: 'openai', models: ['gpt-1', 'gpt-2', 'gpt-3'],
+    currentModel: 'openai/gpt-3', currentPage: 2, totalPages: 2, pageSize: 2 }), { [ID]: { buttons: [
+    [{ text: 'gpt-3 ✓', callbackData: '/model openai/gpt-3', style: 'attention' }],
+    [{ text: '◀ Назад', callbackData: '/models list openai 1', style: 'base' }],
+    [{ text: 'Все провайдеры', callbackData: '/models', style: 'base' }],
+  ] } });
+  assert.deepEqual(buildModelBrowseChannelData(), { [ID]: { buttons: [[
+    { text: 'Выбрать модель', callbackData: '/models', style: 'primary' },
+  ]] } });
+});
 function fixture(settings = {}, payloads) {
   const cfg = config({ dmPolicy: 'allowlist', allowFrom: [USER], ...settings });
   const { core, seen } = installRuntime({ cfg, ...(payloads ? { payloads } : {}) });

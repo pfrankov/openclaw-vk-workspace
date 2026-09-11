@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.5] - 2026-09-11
+
+### Fixed
+
+- `/models` now uses native VK Workspace buttons for provider selection, paged model selection and returning to the provider list.
+- The current model is marked in the menu; long labels are bounded and oversized callback commands are omitted safely.
+
+### Scope
+
+- Model commands use the existing single-use, sender-bound callback authorization path. Other messages and commands are unchanged.
+
 ## [0.1.4] - 2026-09-11
 
 ### Fixed

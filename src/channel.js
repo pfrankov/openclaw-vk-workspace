@@ -4,6 +4,7 @@ import { TeamsApi } from './api.js';
 import { monitorAccount } from './monitor.js';
 import { sendPayload } from './send.js';
 import { messageActions } from './actions.js';
+import { buildModelBrowseChannelData, buildModelsListChannelData, buildModelsProviderChannelData } from './keyboard.js';
 
 const targetType = (raw) => /^vk-workspace:chat:/i.test(raw) || normalizeId(raw).endsWith('@chat.agent') ? 'group' : 'direct';
 const validTarget = (raw) => { const id = normalizeId(raw); return id && !/[\x00-\x20\x7f]/.test(id) ? id : undefined; };
@@ -16,6 +17,12 @@ export async function probeAccount({ account, timeoutMs = 10000 }) {
 }
 export const channelPlugin = {
   ...setupPlugin,
+  commands: {
+    buildModelsMenuChannelData: buildModelsProviderChannelData,
+    buildModelsProviderChannelData,
+    buildModelsListChannelData,
+    buildModelBrowseChannelData,
+  },
   actions: messageActions,
   agentPrompt: { messageToolHints: () => [
     'VK Workspace: message(action=send) accepts vkButtons (rows of text/url or text/callbackData), vkFileId, vkVoice and vkTextFormat.',

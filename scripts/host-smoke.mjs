@@ -30,6 +30,14 @@ try {
   await entry.default.register({ runtime: core, config: cfg, registrationMode: 'full',
     registerChannel: (value) => { registered = value.plugin; }, logger: { info() {}, warn() {}, error() {}, debug() {} } });
   assert.equal(registered.id, 'vk-workspace'); assert.equal(setup.setupPlugin.id, registered.id);
+  assert.deepEqual(registered.commands.buildModelsMenuChannelData({ providers: [{ id: 'openai', count: 2 }] }), {
+    'vk-workspace': { buttons: [[{ text: 'openai (2)', callbackData: '/models openai', style: 'primary' }]] },
+  });
+  assert.deepEqual(registered.commands.buildModelsListChannelData({ provider: 'openai', models: ['gpt-a'],
+    currentModel: 'openai/gpt-a', currentPage: 1, totalPages: 1, pageSize: 8 }), { 'vk-workspace': { buttons: [
+    [{ text: 'gpt-a ✓', callbackData: '/model openai/gpt-a', style: 'attention' }],
+    [{ text: 'Все провайдеры', callbackData: '/models', style: 'base' }],
+  ] } });
   const scoped = [];
   core.channel.pairing = { readAllowFromStore: async (params) => { scoped.push(params); return ['allowed']; } };
   assert.deepEqual(await entry.sdkHelpers.createPairing({ core, channel: 'vk-workspace', accountId: 'work' }).readAllowFromStore(), ['allowed']);
@@ -82,5 +90,5 @@ try {
     assert.equal(requests.at(-1).searchParams.get('fileId'), 'voice-id');
     assert.deepEqual(registered.actions.describeMessageTool({ cfg: localCfg }).actions, ['send', 'edit']);
   } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
-  console.log('Packed plugin with real OpenClaw SDK: registration, pairing, command authorization, HTTP send/edit/voice, callbacks and duplicate suppression passed');
+  console.log('Packed plugin with real OpenClaw SDK: registration, model menus, pairing, command authorization, HTTP send/edit/voice, callbacks and duplicate suppression passed');
 } finally { await rm(dir, { recursive: true, force: true }); }
