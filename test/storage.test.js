@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { Inbox, inboxPath } from '../src/inbox.js';
 import { drainInbox, monitorAccount } from '../src/monitor.js';
 import { ApiError } from '../src/api.js';
+import { ProcessingFailure, safeFailure } from '../src/processing-failure.js';
 import { event, account, tempDir, config } from './helpers.js';
 
 const statusSdk = {
@@ -74,6 +75,26 @@ test('drain runs chats concurrently, preserves FIFO within each and retains fail
   assert(!seen.includes('2')); assert(seen.indexOf('3') < seen.indexOf('4'));
   assert.deepEqual(inbox.state.pending.map((x) => x.event.eventId), ['2']);
   assert.equal(inbox.state.failed[0].event.eventId, '1');
+});
+test('failed events retain only safe stage diagnostics and clear them before explicit retry', async (t) => {
+  const inbox = await makeInbox(t); await inbox.ingest([event(58)]); let reported;
+  await drainInbox({ inbox, handle: async () => { throw new ProcessingFailure('media-download', 'untrusted-origin',
+    'Media download failed: origin https://private-files.example is not allowed; add it to mediaAllowedOrigins'); },
+  onFailure: (id, failure) => { reported = { id, failure }; } });
+  assert.deepEqual(reported, { id: '58', failure: { stage: 'media-download', code: 'untrusted-origin',
+    message: 'Media download failed: origin https://private-files.example is not allowed; add it to mediaAllowedOrigins' } });
+  assert.deepEqual(inbox.state.failed[0].failure, reported.failure);
+  await inbox.retryFailed(); assert.equal(inbox.state.pending[0].failure, undefined);
+});
+test('generated failure diagnostics remain valid and readable after truncation and restart', async (t) => {
+  const path = join(await tempDir(t), 'state.json'); const inbox = await new Inbox(path).open();
+  await inbox.ingest([event(1)]);
+  const failure = safeFailure(new ProcessingFailure('INVALID', 'also invalid', `Origin ${'x'.repeat(500)}\u0000secret`), 'media-download');
+  assert.equal(failure.stage, 'media-download'); assert.equal(failure.code, 'unexpected');
+  assert(failure.message.length <= 300); assert(!failure.message.includes('\u0000'));
+  await inbox.fail('1', { terminal: true, failure }); await inbox.close();
+  const reopened = await new Inbox(path).open(); t.after(() => reopened.close());
+  assert.deepEqual(reopened.state.failed[0].failure, failure);
 });
 test('abort does not mark an unfinished event as completed or failed', async (t) => {
   const inbox = await makeInbox(t); await inbox.ingest([event(1)]); const controller = new AbortController();

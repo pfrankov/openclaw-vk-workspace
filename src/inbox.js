@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { eventId } from './api.js';
 import { atomicWrite, syncDirectory } from './state.js';
+import { validFailure } from './processing-failure.js';
 
 const MAX_ITEMS = 1000;
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -41,7 +42,8 @@ export class Inbox {
         const ids = new Set();
         for (const entry of [...state.pending, ...state.failed]) {
           const id = eventId(entry.event?.eventId);
-          if (BigInt(id) > BigInt(state.cursor) || ids.has(id) || !Number.isSafeInteger(entry.attempts) || entry.attempts < 0) throw new Error('Invalid inbox entry');
+          if (BigInt(id) > BigInt(state.cursor) || ids.has(id) || !Number.isSafeInteger(entry.attempts) ||
+              entry.attempts < 0 || !validFailure(entry.failure)) throw new Error('Invalid inbox entry');
           entry.event.eventId = id;
           ids.add(id);
         }
@@ -96,14 +98,14 @@ export class Inbox {
       return state;
     });
   }
-  fail(id, { terminal = false } = {}) {
+  fail(id, { terminal = false, failure } = {}) {
     return this.#update((state) => {
       const entry = state.pending.find((item) => item.event.eventId === id);
       if (!entry) return state;
       entry.attempts++;
       if (terminal || entry.attempts >= 3) {
         state.pending = state.pending.filter((item) => item !== entry);
-        state.failed.push({ ...entry, reason: terminal ? 'processing-failed' : 'attempts-exhausted' });
+        state.failed.push({ ...entry, reason: terminal ? 'processing-failed' : 'attempts-exhausted', failure });
       }
       return state;
     });
@@ -117,7 +119,8 @@ export class Inbox {
   }
   retryFailed() {
     return this.#update((state) => {
-      state.pending.push(...state.failed.map((entry) => ({ ...entry, started: false, reason: undefined, attempts: 0 })));
+      state.pending.push(...state.failed.map((entry) => ({ ...entry, started: false, reason: undefined,
+        failure: undefined, attempts: 0 })));
       state.pending.sort((a, b) => BigInt(a.event.eventId) < BigInt(b.event.eventId) ? -1 : 1);
       state.failed = [];
       return state;

@@ -24,6 +24,8 @@ try {
   const setup = await import(pathToFileURL(join(base, 'dist/setup-entry.js')));
   const { resolveAccount } = await import(pathToFileURL(join(base, 'dist/config.js')));
   const { handleInbound } = await import(pathToFileURL(join(base, 'dist/inbound.js')));
+  const { normalizeVoiceMedia } = await import(pathToFileURL(join(base, 'dist/media.js')));
+  const { buildAudioTranscriptionFormData } = await import('openclaw/plugin-sdk/provider-http');
   const cfg = config({ dmPolicy: 'allowlist', allowFrom: ['user@example.com'] });
   const { core, seen } = installRuntime({ cfg });
   let registered;
@@ -46,6 +48,19 @@ try {
     authorizers: [{ configured: true, allowed: false }] });
   assert.equal(gate.shouldBlock, true);
   assert.equal(entry.sdkHelpers.mediaFacts([{ path: '/tmp/example.png', contentType: 'image/png', kind: 'image' }], { messageId: 'm' }).length, 1);
+  const ogg = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(16)]);
+  const normalizedVoice = normalizeVoiceMedia({ buffer: ogg, fileName: 'opaque', contentType: 'application/octet-stream' });
+  const transcriptionForm = buildAudioTranscriptionFormData({ buffer: ogg, fileName: normalizedVoice.fileName,
+    mime: normalizedVoice.contentType, fields: { model: 'test-transcriber' } });
+  assert.equal(transcriptionForm.get('file').name, 'opaque.ogg');
+  assert.equal(transcriptionForm.get('file').type, 'audio/ogg');
+  const normalizedAac = normalizeVoiceMedia({ buffer: Buffer.from([0xff, 0xf1, 0x50, 0x80]), fileName: 'voice',
+    contentType: 'application/octet-stream' });
+  assert.deepEqual(normalizedAac, { contentType: 'audio/aac', fileName: 'voice.aac' });
+  const aacForm = buildAudioTranscriptionFormData({ buffer: Buffer.from('opaque audio'), fileName: normalizedAac.fileName,
+    mime: normalizedAac.contentType, fields: { model: 'test-transcriber' } });
+  assert.equal(aacForm.get('file').name, 'voice.m4a');
+  assert.equal(aacForm.get('file').type, 'audio/aac');
   const sent = [];
   await handleInbound({ event: event(), self: { userId: 'bot@example.com' }, account: resolveAccount(cfg), cfg,
     api: { sendTyping: async () => {}, sendText: async (chatId, text) => { sent.push({ chatId, text }); return { chatId, messageId: 'r' }; } } });
@@ -93,5 +108,5 @@ try {
     assert.equal(requests.at(-1).searchParams.get('fileId'), 'voice-id');
     assert.deepEqual(registered.actions.describeMessageTool({ cfg: localCfg }).actions, ['send', 'edit']);
   } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
-  console.log('Packed plugin with real OpenClaw SDK: registration, model menus, pairing, command authorization, HTTP send/edit/voice, callbacks and duplicate suppression passed');
+  console.log('Packed plugin with real OpenClaw SDK: registration, model menus, pairing, audio multipart metadata, HTTP send/edit/voice, callbacks and duplicate suppression passed');
 } finally { await rm(dir, { recursive: true, force: true }); }
