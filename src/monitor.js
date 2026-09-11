@@ -4,6 +4,7 @@ import { Inbox, inboxPath } from './inbox.js';
 import { handleInbound } from './inbound.js';
 import { getRuntime } from './runtime.js';
 import { resolveStateDir } from './state.js';
+import { safeFailure } from './processing-failure.js';
 export { resolveStateDir } from './state.js';
 
 export async function drainInbox({ inbox, handle, signal, onFailure }) {
@@ -24,10 +25,11 @@ export async function drainInbox({ inbox, handle, signal, onFailure }) {
         if (signal?.aborted) return;
         await inbox.start(item.event.eventId); // Durable fence before any possible agent/tool effect.
         try { await handle(item.event); }
-        catch {
+        catch (error) {
           if (signal?.aborted) return;
-          await inbox.fail(item.event.eventId, { terminal: true });
-          onFailure?.(item.event.eventId);
+          const failure = safeFailure(error);
+          await inbox.fail(item.event.eventId, { terminal: true, failure });
+          onFailure?.(item.event.eventId, failure);
           // Preserve order: an operator must resolve the failed turn before this chat continues.
           break;
         }
@@ -73,8 +75,11 @@ export async function monitorAccount(ctx, deps = {}) {
       if (inbox.state.pending.length) {
         await drainInbox({ inbox, signal,
           handle: (event) => (deps.handle ?? handleInbound)({ event, self, account, cfg: ctx.cfg, api, signal, log, setStatus }),
-          onFailure: () => { log('VK Workspace event processing failed; retained in durable inbox');
-            setStatus({ lastError: 'Event processing failed; inspect the durable inbox' }); },
+          onFailure: (id, failure) => {
+            const message = `Event ${id} failed at ${failure.stage}/${failure.code}: ${failure.message}`;
+            log(`VK Workspace ${message}; retained in durable inbox`);
+            setStatus({ lastError: message });
+          },
         });
         if (signal?.aborted) break;
         // Blocked conversations do not prevent polling or progress in unrelated chats.

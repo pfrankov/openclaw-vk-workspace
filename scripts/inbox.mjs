@@ -14,7 +14,8 @@ if (!['status', 'retry', 'discard'].includes(command) || !path || !isAbsolute(pa
     if (command === 'retry') await inbox.retryFailed();
     if (command === 'discard') await inbox.discardFailed(eventId(id));
     console.log(JSON.stringify({ cursor: inbox.state.cursor, pending: inbox.state.pending.length,
-      failed: inbox.state.failed.map(({ event, attempts, reason }) => ({ eventId: event.eventId, type: event.type, attempts, reason })) }, null, 2));
+      failed: inbox.state.failed.map(({ event, attempts, reason, failure }) => ({ eventId: event.eventId,
+        type: event.type, attempts, reason, failure })) }, null, 2));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
   finally { await inbox.close(); }
 }

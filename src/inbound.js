@@ -3,6 +3,7 @@ import { inboundMedia } from './media.js';
 import { getRuntime } from './runtime.js';
 import { sendPayload } from './send.js';
 import { getMessageStore } from './message-store.js';
+import { ProcessingFailure } from './processing-failure.js';
 
 const validMessageId = (value) => typeof value === 'number' ? Number.isSafeInteger(value)
   : typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\x00-\x20\x7f]/.test(value);
@@ -157,7 +158,7 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
   signal?.throwIfAborted();
   setStatus?.({ lastInboundAt: Date.now() });
   const { onModelSelected, ...prefix } = sdk.replyPrefix({ cfg, agentId: route.agentId, channel: CHANNEL_ID, accountId: account.accountId });
-  let deliveryFailed = false;
+  let deliveryFailure;
   let settled = false;
   const typing = () => !settled && !signal?.aborted
     ? api.sendTyping(message.chatId, { signal }).catch(() => {}) : Promise.resolve();
@@ -178,8 +179,14 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
             mediaLocalRoots: sdk.mediaRoots(cfg, route.agentId) });
           if (result.messageId) setStatus?.({ lastOutboundAt: Date.now() });
         },
-        onError: () => { deliveryFailed = true; log?.('VK Workspace reply dispatch failed'); },
+        onError: () => {
+          const audio = ctx.media?.some((item) => item?.kind === 'audio' || item?.contentType?.startsWith('audio/'));
+          deliveryFailure = new ProcessingFailure('agent-dispatch', audio ? 'audio-processing-failed' : 'reply-failed',
+            audio ? 'VK Workspace reply delivery failed during OpenClaw audio processing; inspect provider logs'
+              : 'VK Workspace reply delivery failed; inspect Gateway logs');
+          log?.(`VK Workspace ${deliveryFailure.stage}/${deliveryFailure.code}`);
+        },
       }, replyOptions: { onModelSelected, abortSignal: signal } });
-    if (deliveryFailed) throw new Error('VK Workspace reply delivery failed');
+    if (deliveryFailure) throw deliveryFailure;
   } finally { settled = true; clearInterval(timer); }
 }
