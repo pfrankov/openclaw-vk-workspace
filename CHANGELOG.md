@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.10] - 2026-09-11
+
+### Documentation
+
+- Reworked the README around a safe end-to-end quick start, concise configuration reference, channel features and operator recovery.
+- Corrected command, callback, media-origin, environment precedence and queue-recovery guidance against OpenClaw 2026.9.3 and the plugin implementation.
+- Moved maintainer-only validation and release instructions to CONTRIBUTING and consolidated user scenarios into one authoritative file.
+
 ## [0.1.9] - 2026-09-11
 
 ### Fixed
