@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Prefer voice content signatures over conflicting CDN MIME hints; retain recognized audio MIME after host storage and preserve the extension within bounded filenames, including WebM name fallback.
+- Report malformed media URLs and redirects separately from network/TLS failures; preserve cancellation across attachment metadata and storage boundaries.
+- Distinguish actual dispatcher/delivery failures without diagnosing STT solely from an attached audio file; keep successful host fallback and failed mention preflight nonterminal.
+- Keep newly generated processing diagnostics single-line and validate fallback stages while retaining compatibility with older inbox diagnostics.
+
+### Added
+
+- Ship an offline recovery CLI in `dist/inbox-cli.js`: read-only status, targeted retry/discard, explicit `--all`, and a private durable backup under the consumer lock before any mutation, including interrupted-turn quarantine. Preserve cursor and unrelated events and never steal locks or initialize a mistyped path.
+- Incident regressions for separate CDN origins, audio signatures/MIME conflicts, aborts, secret-safe failure persistence, host fallback and safe recovery. Extend the packed-artifact smoke with the pinned real SDK and a local OpenAI-compatible STT endpoint, AAC multipart, private-network denial and rejected preflight handling.
+- Corporate STT configuration, plugin consent/allowlist precautions, runtime-version verification and Gateway/service troubleshooting guidance with placeholder-only examples.
+
 ## [0.1.10] - 2026-09-11
 
 ### Documentation

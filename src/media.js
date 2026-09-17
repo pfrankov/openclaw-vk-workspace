@@ -20,7 +20,9 @@ export function safeFileName(value) {
 }
 const maxBytesFor = (account) => account.config.mediaMaxMb * 1024 * 1024;
 export function trustedMediaUrl(input, account) {
-  const url = new URL(input);
+  let url;
+  try { url = new URL(input); }
+  catch { throw new ProcessingFailure('media-download', 'invalid-url', 'Media download URL is invalid'); }
   const origins = [new URL(account.baseUrl).origin, ...(account.config.mediaAllowedOrigins ?? [])];
   if (url.username || url.password || !origins.includes(url.origin) ||
       !['http:', 'https:'].includes(url.protocol) ||
@@ -45,7 +47,8 @@ export async function downloadTrusted(input, account, signal, fetchImpl = global
         await response.body?.cancel();
         const location = response.headers.get('location');
         if (!location) throw new ProcessingFailure('media-download', 'invalid-redirect', 'Media redirect has no destination');
-        next = new URL(location, url).href;
+        try { next = new URL(location, url).href; }
+        catch { throw new ProcessingFailure('media-download', 'invalid-redirect', 'Media redirect destination is invalid'); }
         continue;
       }
       if (!response.ok) { await response.body?.cancel(); throw new ProcessingFailure('media-download', 'http-rejected',
@@ -84,17 +87,21 @@ function sniffAudio(buffer) {
 export function normalizeVoiceMedia({ buffer, fileName, contentType, declaredType }) {
   const name = safeFileName(fileName || 'voice');
   const declaredMime = typeof declaredType === 'string' && declaredType.includes('/') ? declaredType.split(';')[0] : undefined;
-  const extensionMime = MIME[extname(name).toLowerCase()];
+  const extension = extname(String(fileName || 'voice')).toLowerCase();
+  const extensionMime = extension === '.webm' ? 'audio/webm' : MIME[extension];
   const canonical = (value) => {
     const normalized = value?.trim().toLowerCase();
     const candidate = AUDIO_MIME_ALIAS[normalized] ?? normalized;
     return AUDIO_EXTENSION[candidate] ? candidate : undefined;
   };
-  const mime = [contentType?.split(';')[0], declaredMime, extensionMime].map(canonical).find(Boolean) ?? sniffAudio(buffer);
+  // CDN headers and filenames are hints, not authority over a recognized audio signature.
+  const mime = sniffAudio(buffer) ?? [declaredMime, extensionMime, contentType?.split(';')[0]].map(canonical).find(Boolean);
   if (!mime || !AUDIO_EXTENSION[mime]) throw new ProcessingFailure('media-normalize', 'unsupported-audio',
     'Voice attachment format could not be identified');
   const suffix = AUDIO_EXTENSION[mime];
-  const normalizedName = AUDIO_EXTENSION[extensionMime] === suffix ? name : `${name}${suffix}`;
+  // Reserve room for the suffix: saveMediaBuffer may sanitize/truncate the name again.
+  const stem = extname(name).toLowerCase() === suffix ? name.slice(0, -suffix.length) : name;
+  const normalizedName = `${stem.slice(0, 180 - suffix.length).replace(/[\uD800-\uDBFF]$/, '')}${suffix}`;
   return { contentType: mime, fileName: normalizedName };
 }
 
@@ -149,27 +156,39 @@ export async function loadOutboundMedia(input, { account, core, mediaLocalRoots,
 }
 
 export async function inboundMedia(parts, { api, account, core, signal }) {
+  signal?.throwIfAborted();
   const files = parts.filter((part) => ['file', 'voice', 'sticker'].includes(part?.type) && typeof part.payload?.fileId === 'string');
   if (files.length > 10) throw new ProcessingFailure('media-metadata', 'attachment-limit',
     'At most 10 attachments per message are supported');
   const media = [];
   for (const part of files) {
+    signal?.throwIfAborted();
     let info;
     try { info = await api.getFileInfo(part.payload.fileId, { signal }); }
-    catch { throw new ProcessingFailure('media-metadata', 'api-failed', 'files/getInfo failed for the attachment'); }
-    if (typeof info.url !== 'string' || (typeof info.size === 'number' && info.size > maxBytesFor(account))) {
+    catch {
+      signal?.throwIfAborted();
+      throw new ProcessingFailure('media-metadata', 'api-failed', 'files/getInfo failed for the attachment');
+    }
+    signal?.throwIfAborted();
+    if (!info || typeof info.url !== 'string' || (typeof info.size === 'number' && info.size > maxBytesFor(account))) {
       throw new ProcessingFailure('media-metadata', 'invalid', 'Attachment metadata is invalid or exceeds the size limit (mediaMaxMb)');
     }
     // Do not forward signed URLs into the model context. Materialize into the host media store first.
     const fetched = await downloadTrusted(info.url, account, signal);
-    let fileName = safeFileName(info.filename || fetched.fileName);
+    const sourceName = info.filename || fetched.fileName;
+    let fileName = safeFileName(sourceName);
     let contentType = fetched.contentType || MIME[extname(fileName).toLowerCase()] || 'application/octet-stream';
-    if (part.type === 'voice') ({ fileName, contentType } = normalizeVoiceMedia({ buffer: fetched.buffer, fileName,
+    if (part.type === 'voice') ({ fileName, contentType } = normalizeVoiceMedia({ buffer: fetched.buffer, fileName: sourceName,
       contentType, declaredType: info.type }));
+    signal?.throwIfAborted();
     let saved;
     try { saved = await core.channel.media.saveMediaBuffer(fetched.buffer, contentType, 'inbound', maxBytesFor(account), fileName); }
-    catch { throw new ProcessingFailure('media-store', 'write-failed', 'OpenClaw could not store the inbound attachment'); }
-    media.push({ path: saved.path, contentType: saved.contentType || contentType, fileName,
+    catch {
+      signal?.throwIfAborted();
+      throw new ProcessingFailure('media-store', 'write-failed', 'OpenClaw could not store the inbound attachment');
+    }
+    signal?.throwIfAborted();
+    media.push({ path: saved.path, contentType: part.type === 'voice' ? contentType : saved.contentType || contentType, fileName,
       kind: part.type === 'voice' ? 'audio' : part.type === 'sticker' ? 'sticker'
         : contentType.startsWith('image/') ? 'image' : contentType.startsWith('audio/') ? 'audio'
           : contentType.startsWith('video/') ? 'video' : 'document' });
