@@ -16,7 +16,7 @@ export class Inbox {
   #tail = Promise.resolve();
   #lease;
   constructor(path) { this.path = path; this.state = { version: 1, cursor: '0', pending: [], failed: [] }; }
-  async open() {
+  async open({ recoverInterrupted = true } = {}) {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     await syncDirectory(dirname(dirname(this.path)));
     const lock = `${this.path}.lock`;
@@ -50,7 +50,7 @@ export class Inbox {
         // A process may have stopped after a tool effect or send but before completion.
         // Quarantine those turns rather than executing them again automatically.
         const interrupted = state.pending.filter((entry) => entry.started);
-        if (interrupted.length) {
+        if (recoverInterrupted && interrupted.length) {
           state.pending = state.pending.filter((entry) => !entry.started);
           state.failed.push(...interrupted.map((entry) => ({ ...entry, reason: 'interrupted' })));
           await this.#commit(state);
@@ -110,6 +110,14 @@ export class Inbox {
       return state;
     });
   }
+  quarantineInterrupted() {
+    return this.#update((state) => {
+      const interrupted = state.pending.filter((entry) => entry.started);
+      state.pending = state.pending.filter((entry) => !entry.started);
+      state.failed.push(...interrupted.map((entry) => ({ ...entry, reason: 'interrupted' })));
+      return state;
+    });
+  }
   discardFailed(id) {
     return this.#update((state) => {
       if (!state.failed.some((entry) => entry.event.eventId === id)) throw new Error('Failed event not found');
@@ -117,12 +125,14 @@ export class Inbox {
       return state;
     });
   }
-  retryFailed() {
+  retryFailed(id) {
     return this.#update((state) => {
-      state.pending.push(...state.failed.map((entry) => ({ ...entry, started: false, reason: undefined,
+      const selected = id === undefined ? state.failed : state.failed.filter((entry) => entry.event.eventId === id);
+      if (id !== undefined && !selected.length) throw new Error('Failed event not found');
+      state.pending.push(...selected.map((entry) => ({ ...entry, started: false, reason: undefined,
         failure: undefined, attempts: 0 })));
       state.pending.sort((a, b) => BigInt(a.event.eventId) < BigInt(b.event.eventId) ? -1 : 1);
-      state.failed = [];
+      state.failed = id === undefined ? [] : state.failed.filter((entry) => entry.event.eventId !== id);
       return state;
     });
   }

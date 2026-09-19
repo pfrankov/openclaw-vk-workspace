@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { installRuntime, config, event } from '../test/helpers.js';
+import { checkHostAudio } from './host-audio-smoke.mjs';
 
 const root = resolve(fileURLToPath(new URL('../', import.meta.url)));
 process.chdir(root);
@@ -108,5 +109,6 @@ try {
     assert.equal(requests.at(-1).searchParams.get('fileId'), 'voice-id');
     assert.deepEqual(registered.actions.describeMessageTool({ cfg: localCfg }).actions, ['send', 'edit']);
   } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
+  await checkHostAudio(base, dir);
   console.log('Packed plugin with real OpenClaw SDK: registration, model menus, pairing, audio multipart metadata, HTTP send/edit/voice, callbacks and duplicate suppression passed');
 } finally { await rm(dir, { recursive: true, force: true }); }

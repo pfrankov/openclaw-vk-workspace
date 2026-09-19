@@ -14,7 +14,7 @@ Use `pfrankov/openclaw-vk` for OpenClaw integration patterns and `pfrankov/n8n-n
 - `src/format.js`, `src/keyboard.js`, `src/message-store.js`, `src/actions.js`: bounded rendering, opaque single-use menus, bot-owned message receipts and standard message-tool adapters.
 - `src/state.js`: shared atomic persistence and POSIX directory sync.
 - `src/inbound.js`: event normalization, access checks, native OpenClaw routing/session/dispatch integration.
-- `src/inbox.js`, `src/monitor.js`: durable cursor, pending/failed events, per-chat FIFO and polling lifecycle.
+- `src/inbox.js`, `src/monitor.js`: durable cursor, pending/failed events, per-chat FIFO and polling lifecycle. `src/inbox-cli.js` is the shipped offline recovery entry; `status` must not change JSON, and mutations must snapshot under the consumer lock before quarantine/retry/discard.
 - `test/`: native `node:test` tests, local HTTP fixtures and runtime test doubles. `scripts/host-smoke.mjs` additionally loads the actual packed artifact with the real SDK.
 
 ## Non-negotiable contracts
@@ -32,6 +32,8 @@ Use `pfrankov/openclaw-vk` for OpenClaw integration patterns and `pfrankov/n8n-n
 ## Validation
 
 Keep format and plain modes tested; never feed raw HTML through parseMode. Test duplicate/expired/wrong-user/wrong-chat callbacks, account isolation, edit authorization and interrupted-turn recovery.
+
+Audio contract smoke uses the real pinned SDK and a local HTTP transcription fixture, not a live corporate endpoint or an ASR-quality benchmark. The AAC fixture is a generated tone, not user audio. Preserve separate-origin and scoped-private-network checks.
 
 Run `npm ci --ignore-scripts` and `npm run check`. Add regression tests for every transport, authorization, cursor, retry, attachment or packaging fix. Use real local HTTP requests for serialization tests, not only fetch mocks. Assert blocked input never reaches downstream effects.
 

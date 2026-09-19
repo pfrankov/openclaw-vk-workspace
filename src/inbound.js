@@ -180,13 +180,18 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
           if (result.messageId) setStatus?.({ lastOutboundAt: Date.now() });
         },
         onError: () => {
-          const audio = ctx.media?.some((item) => item?.kind === 'audio' || item?.contentType?.startsWith('audio/'));
-          deliveryFailure = new ProcessingFailure('agent-dispatch', audio ? 'audio-processing-failed' : 'reply-failed',
-            audio ? 'VK Workspace reply delivery failed during OpenClaw audio processing; inspect provider logs'
-              : 'VK Workspace reply delivery failed; inspect Gateway logs');
+          // The dispatcher reports a failed reply here, not a transcription diagnosis.
+          // An audio attachment alone is not evidence that STT caused the failure.
+          deliveryFailure = new ProcessingFailure('reply-delivery', 'reply-failed',
+            'VK Workspace reply delivery failed; inspect Gateway logs');
           log?.(`VK Workspace ${deliveryFailure.stage}/${deliveryFailure.code}`);
         },
       }, replyOptions: { onModelSelected, abortSignal: signal } });
     if (deliveryFailure) throw deliveryFailure;
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof ProcessingFailure) throw error;
+    throw deliveryFailure ?? new ProcessingFailure('agent-dispatch', 'reply-failed',
+      'OpenClaw reply processing failed; inspect Gateway provider logs for the matching event');
   } finally { settled = true; clearInterval(timer); }
 }

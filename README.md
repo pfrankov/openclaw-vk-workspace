@@ -23,6 +23,13 @@ Gateway, агент, модель и её credentials должны быть на
    openclaw plugins enable vk-workspace
    ```
 
+   Если OpenClaw требует capability consent или отменяет установку из-за отсутствия trust metadata, сначала проверьте источник пакета и запрошенные capabilities. Только после этого подтвердите установку:
+
+   ```bash
+   openclaw plugins install --force --accept-capabilities @openclaw-vk/vk-workspace
+   openclaw plugins enable --accept-capabilities vk-workspace
+   ```
+
 2. Создайте бота в Metabot на вашем сервере VK Teams. Получите токен и уточните URL Bot API у администратора: адрес может отличаться от URL веб-клиента.
 
 3. Добавьте канал в существующий `~/.openclaw/openclaw.json`:
@@ -44,7 +51,7 @@ Gateway, агент, модель и её credentials должны быть на
    }
    ```
 
-   Не заменяйте примером весь конфиг. Если `plugins.allow` уже существует, добавьте `vk-workspace` в массив, не удаляя другие плагины; так же объедините `plugins.entries`, модели, агентов и каналы. `YOUR_BOT_TOKEN` — плейсхолдер, не настоящий токен.
+   Не заменяйте примером весь конфиг. **`plugins.allow` — ограничивающий список, а не добавление одного разрешения.** При его создании перечислите все используемые плагины, включая встроенные провайдеры (например, `openai` для STT); при изменении сохраните существующие записи и добавьте `vk-workspace`. Иначе работавшие провайдеры могут отключиться; так же объедините `plugins.entries`, модели, агентов и каналы. `YOUR_BOT_TOKEN` — плейсхолдер, не настоящий токен.
 
 4. Перезапустите Gateway и проверьте соединение:
 
@@ -70,7 +77,11 @@ Gateway, агент, модель и её credentials должны быть на
 openclaw plugins update vk-workspace
 openclaw gateway restart
 openclaw plugins inspect vk-workspace
+openclaw plugins list
+openclaw channels status --probe
 ```
+
+Сверьте версию и путь загруженного плагина с ожидаемым релизом. Обновлённый пакет на диске ещё не означает, что работающий Gateway использует новый код: нужен успешный restart. После него отправьте обычный текст и голосовое и проверьте `openclaw logs --follow`; один успешный probe не проверяет скачивание CDN или STT.
 
 Пакет публикуется как [`@openclaw-vk/vk-workspace`](https://www.npmjs.com/package/@openclaw-vk/vk-workspace) через npm Trusted Publishing с provenance и без постоянного `NPM_TOKEN`. История версий находится в [GitHub Releases](https://github.com/pfrankov/openclaw-vk-workspace/releases).
 
@@ -247,7 +258,46 @@ openclaw plugins inspect vk-workspace
 }
 ```
 
-Входящие voice с generic MIME распознаются по имени или сигнатуре OGG, Opus, MP3, AAC, M4A, WAV и WebM перед передачей в STT OpenClaw. В группе с `requireMention: true` одиночное голосовое может пройти предварительную транскрипцию только для проверки произнесённого обращения к боту. Доступ отправителя проверяется до скачивания.
+Входящие voice распознаются перед передачей в STT OpenClaw: сигнатура содержимого имеет приоритет над audio MIME в metadata, расширением имени и HTTP `Content-Type`. Это исправляет и `application/octet-stream`, и ошибочный конкретный MIME. Поддерживаются контейнеры OGG/Opus, MP3, AAC/ADTS, M4A, WAV и WebM; расширение сохраняется даже у длинных имён. Это определение формата, не декодирование и не перекодирование звука. В группе с `requireMention: true` одиночное голосовое может пройти предварительную транскрипцию только для проверки произнесённого обращения к боту. Доступ отправителя проверяется до скачивания.
+
+### Корпоративный OpenAI-compatible STT
+
+Обычный chat provider с произвольным именем (например, `ai-gateway`) не становится media provider с `transcribeAudio`. Для совместимого `/v1/audio/transcriptions` используйте встроенный media provider `openai`, отдельную STT-модель и корпоративный `baseUrl`. Ниже **фрагмент для объединения** с существующим конфигом OpenClaw 2026.9.3, не замена моделей, агентов и плагинов:
+
+```json
+{
+  "models": {
+    "providers": {
+      "openai": {
+        "baseUrl": "https://ai.example.com/v1",
+        "api": "openai-completions",
+        "auth": "api-key",
+        "apiKey": "YOUR_STT_API_KEY",
+        "request": { "allowPrivateNetwork": true },
+        "models": []
+      }
+    }
+  },
+  "tools": {
+    "media": {
+      "models": [{
+        "type": "provider",
+        "provider": "openai",
+        "model": "YOUR_STT_MODEL",
+        "capabilities": ["audio"],
+        "baseUrl": "https://ai.example.com/v1"
+      }],
+      "audio": { "enabled": true, "preferredModel": "openai/YOUR_STT_MODEL" }
+    }
+  }
+}
+```
+
+`YOUR_STT_API_KEY` и `YOUR_STT_MODEL` — плейсхолдеры. В production используйте поддерживаемые OpenClaw env/file-backed secrets; убедитесь, что они доступны именно сервису Gateway. Не затирайте уже настроенный `models.providers.openai`: его URL, credentials и request policy используются и другими обращениями к этому provider. Сохраните существующие модели и записи `tools.media.models`. Встроенный плагин `openai` должен быть включён и присутствовать в `plugins.allow`, если этот список задан.
+
+`allowPrivateNetwork` нужен **только** для контролируемого endpoint, который резолвится в private/internal IP; для публичного сервера удалите `request`. Не отключайте SSRF или TLS глобально. Это отдельная настройка от `channels.vk-workspace.mediaAllowedOrigins`: первая разрешает запрос STT к доверенному провайдеру, вторая — скачивание файла с CDN. Успешный chat completion не подтверждает работоспособность STT.
+
+Отказ STT, который OpenClaw обработал без исключения, сам по себе не делает событие failed. Без транскрипта одиночное голосовое в группе с обязательным упоминанием не обходит mention gate; следующее текстовое обращение продолжает обрабатываться. Реальная ошибка dispatch/delivery остаётся в очереди и требует решения оператора.
 
 ## Вложения и безопасность сети
 
@@ -257,7 +307,7 @@ openclaw plugins inspect vk-workspace
 { "mediaAllowedOrigins": ["https://files.example.com"] }
 ```
 
-Указывайте точный origin без пути и конечного `/`; каждый redirect проверяется заново. Добавление origin означает явное доверие этому серверу и для входящих файлов, и для исходящих URL. Остальные исходящие URL проходят SSRF-защиту OpenClaw, поэтому не добавляйте произвольные внутренние сервисы. Токен бота не отправляется файловому серверу, а подписанный URL не передаётся модели. Локальные исходящие файлы доступны только внутри media roots OpenClaw. Поддерживается до 10 входящих вложений; исходящие файлы ограничены 100 МБ суммарно.
+Origin из ответа `files/getInfo` может отличаться от Bot API (включая дополнительный CDN или redirect). Сверьте его с администратором и внесите каждый доверенный origin отдельно. Указывайте точный origin без пути, query и конечного `/`; каждый redirect проверяется заново. Добавление origin означает явное доверие этому серверу и для входящих файлов, и для исходящих URL. Остальные исходящие URL проходят SSRF-защиту OpenClaw, поэтому не добавляйте произвольные внутренние сервисы. Токен бота не отправляется файловому серверу, а подписанный URL не передаётся модели. Локальные исходящие файлы доступны только внутри media roots OpenClaw. Поддерживается до 10 входящих вложений; исходящие файлы ограничены 100 МБ суммарно.
 
 Bot API передаёт токен и текст в query. Плагин скрывает полные URL и сырые API-ошибки, но access-логи сервера и reverse proxy также должны скрывать query. Не запускайте два long-poll потребителя с одним токеном: они будут забирать события друг у друга.
 
@@ -267,23 +317,25 @@ Bot API передаёт токен и текст в query. Плагин скр�
 
 Очередь вмещает не более 1000 событий и 16 МиБ. При заполнении освободите её только осознанным `retry` или `discard`; не удаляйте JSON и не сбрасывайте курсор.
 
-Утилита восстановления входит в исходный репозиторий, но не в npm-пакет. Используйте checkout тега, соответствующего установленной версии:
+В failed-событии сохраняются безопасные `stage`, `code`, `message`: отдельно metadata, download, normalize, media-store, agent-dispatch и reply-delivery. Наличие аудиовложения не доказывает, что сбой доставки вызван STT. Сырые provider errors и подписанные URL в эту диагностику не копируются; подробности провайдера ищите в Gateway logs с учётом его политики редактирования секретов.
+
+Утилита входит **в установленный npm-пакет**; доступ к GitHub для восстановления не нужен. Путь плагина найдите через `openclaw plugins inspect vk-workspace` и подставьте вместо `/absolute/plugin`. В checkout доступна та же утилита через `node scripts/inbox.mjs`.
 
 ```bash
-git clone https://github.com/pfrankov/openclaw-vk-workspace.git
-cd openclaw-vk-workspace
-git checkout vX.Y.Z
 openclaw gateway stop
+node /absolute/plugin/dist/inbox-cli.js status /absolute/path/to/inbox.json
 
-node scripts/inbox.mjs status /absolute/path/to/inbox.json
-node scripts/inbox.mjs retry /absolute/path/to/inbox.json
-# Удалить одно событие без повторного выполнения:
-node scripts/inbox.mjs discard /absolute/path/to/inbox.json EVENT_ID
+# Выберите ОДНО действие после проверки уже выполненных ответов и внешних действий:
+node /absolute/plugin/dist/inbox-cli.js retry /absolute/path/to/inbox.json EVENT_ID
+# Или отбросьте только выбранное событие, не трогая следующие pending:
+node /absolute/plugin/dist/inbox-cli.js discard /absolute/path/to/inbox.json EVENT_ID
 
 openclaw gateway start
 ```
 
-Выберите файл `*.json`, но не `*.messages.json`, в каталоге `vk-workspace`; hash зависит от URL и токена, поэтому при нескольких ботах безопасно запустите `status` для каждого кандидата и сопоставьте события по их ID. Команда не печатает тексты сообщений. `retry` возвращает в очередь все failed-события выбранного файла, поэтому сначала проверьте уже выполненные ответы и внешние действия: повтор может продублировать их. `discard EVENT_ID` безвозвратно удаляет одно указанное событие без повторного выполнения.
+Выберите файл `*.json`, но не `*.messages.json` и не `*.backup-*`, в каталоге `vk-workspace`; hash зависит от URL и токена. При нескольких ботах сопоставьте очередь по ID событий. `status` не меняет JSON и не печатает тексты сообщений; `interrupted` перечисляет ID начатых, но не завершённых pending-событий. Команды `retry` и `discard` принимают ID из failed или interrupted; обычные ещё не начатые pending не затрагиваются. Повтор всех таких событий возможен только явно: `retry /absolute/path/to/inbox.json --all`.
+
+Перед изменениями утилита под тем же эксклюзивным lock создаёт рядом копию `*.json.backup-<uuid>` с правами `0600` и выводит её путь. Если копирование или синхронизация не удались, очередь не меняется. Прерванные ходы карантинируются только после backup; затем выполняется выбранное действие. Курсор и остальные сообщения сохраняются. Копия содержит исходные сообщения: храните её как приватные данные. `retry` может повторить уже выполненные побочные эффекты; `discard` сознательно отказывается от повторного выполнения выбранного хода. Утилита не удаляет lock автоматически и не создаёт новую очередь при ошибке в пути.
 
 Если после аварии остался `.lock`, сначала остановите все процессы Gateway с этим ботом и только затем удалите lock именно выбранной очереди:
 
@@ -292,6 +344,17 @@ openclaw gateway start
 ```
 
 Не удаляйте сами `inbox.json` и `*.messages.json`. Lock удаляйте только у выбранной очереди после остановки всех процессов Gateway. Повреждённую очередь восстановите из резервной копии; не обнуляйте курсор.
+
+## Диагностика окружения
+
+```bash
+openclaw config validate
+openclaw gateway status --deep
+openclaw channels status --probe
+openclaw logs --follow
+```
+
+`ECONNREFUSED 127.0.0.1:18789` означает, что TUI не подключился к Gateway, а не ошибку VK Bot API. Проверьте запуск через `openclaw gateway start`. На macOS сбои LaunchAgent и предупреждения о Node из nvm проверяйте через `openclaw doctor`; плагин не должен переустанавливать сервис или менять системный PATH. Недоступность внешнего каталога моделей не равна отказу канала, если настроенные локальные сервисы работают.
 
 ## Ограничения
 
