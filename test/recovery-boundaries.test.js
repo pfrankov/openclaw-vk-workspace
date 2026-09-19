@@ -40,7 +40,7 @@ for (const [extension, contentType] of [['aac', 'audio/aac'], ['webm', 'audio/we
 for (const active of [false, true]) {
   test(`recovery through a queue symlink ${active ? 'respects the active consumer lock' : 'updates the real queue and preserves the symlink'}`,
     { skip: process.platform === 'win32' }, async (t) => {
-      const { symlink, lstat } = await import('node:fs/promises');
+      const { symlink, lstat, realpath } = await import('node:fs/promises');
       const { Inbox } = await import('../src/inbox.js');
       const dir = await tempDir(t), path = join(dir, 'inbox.json'), alias = join(dir, 'queue-alias.json');
       const inbox = await new Inbox(path).open();
@@ -55,7 +55,7 @@ for (const active of [false, true]) {
       else {
         assert.equal(JSON.parse(await readFile(path, 'utf8')).failed.length, 0);
         const { backup } = JSON.parse(lines[0]);
-        assert(backup.startsWith(path + '.backup-'));
+        assert(backup.startsWith(await realpath(path) + '.backup-'));
         assert.equal(await readFile(backup, 'utf8'), before);
       }
     });
