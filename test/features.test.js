@@ -277,7 +277,7 @@ test('message store refuses corrupt state and expires old receipts', async (t) =
 });
 test('message action discovery and prepared sends expose supported fields without granting callback privileges', () => {
   const f = fixture(); const found = messageActions.describeMessageTool({ cfg: f.cfg });
-  assert.deepEqual(found.actions, ['send', 'edit']); assert.equal(found.schema.properties.vkVoice.type, 'boolean');
+  assert.deepEqual(found.actions, ['send', 'edit', 'delete']); assert.equal(found.schema.properties.vkVoice.type, 'boolean');
   const ctx = { cfg: f.cfg, accountId: 'default', requesterAccountId: 'default', requesterSenderId: USER,
     toolContext: { currentChannelProvider: ID, currentChannelId: USER }, params: { vkButtons: buttons, vkTextFormat: 'plain' } };
   const payload = messageActions.prepareSendPayload({ ctx, to: USER, payload: { text: 'Choose' } });

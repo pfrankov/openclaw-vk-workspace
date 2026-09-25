@@ -37,7 +37,7 @@ test('native mention and reply-to-bot detection, attachment-only and forwarded c
   assert.equal(parseMessage(groupEvent({ parts: [{ type: 'reply', payload: { message: reply } }] }), self).reply.msgId, 'previous');
   assert.equal(parseMessage(event(1, { text: '', parts: [{ type: 'voice', payload: { fileId: 'f' } }] }), self).text, '[Attachment]');
   const forward = parseMessage(groupEvent({ parts: [{ type: 'forward', payload: { message: { text: `@[${self.userId}] original` } } }] }), self);
-  assert.equal(forward.wasMentioned, false); assert.match(forward.text, /Forwarded message/);
+  assert.equal(forward.wasMentioned, false); assert.equal(forward.text, 'Привет');
 });
 test('message and reply ids preserve opaque int64 strings and reject unsafe JSON numbers', () => {
   assert.equal(parseMessage(event(1, { msgId: '9223372036854775807' }), self).messageId, '9223372036854775807');

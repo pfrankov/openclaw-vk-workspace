@@ -23,6 +23,7 @@ export async function drainInbox({ inbox, handle, signal, onFailure }) {
     while (!signal?.aborted && queues.length) {
       for (const item of queues.shift()) {
         if (signal?.aborted) return;
+        if (item.cancelledBy) { await inbox.complete(item.event.eventId); continue; }
         await inbox.start(item.event.eventId); // Durable fence before any possible agent/tool effect.
         try { await handle(item.event); }
         catch (error) {

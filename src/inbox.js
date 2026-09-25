@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { eventId } from './api.js';
 import { atomicWrite, syncDirectory } from './state.js';
 import { validFailure } from './processing-failure.js';
+import { validMessageId } from './context.js';
 
 const MAX_ITEMS = 1000;
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -44,6 +45,8 @@ export class Inbox {
           const id = eventId(entry.event?.eventId);
           if (BigInt(id) > BigInt(state.cursor) || ids.has(id) || !Number.isSafeInteger(entry.attempts) ||
               entry.attempts < 0 || !validFailure(entry.failure)) throw new Error('Invalid inbox entry');
+          if (entry.cancelledBy !== undefined && (entry.event.type !== 'newMessage' || entry.started ||
+              BigInt(eventId(entry.cancelledBy)) <= BigInt(id) || BigInt(eventId(entry.cancelledBy)) > BigInt(state.cursor))) throw new Error('Invalid cancellation marker');
           entry.event.eventId = id;
           ids.add(id);
         }
@@ -83,6 +86,19 @@ export class Inbox {
         .sort((a, b) => BigInt(a.eventId) < BigInt(b.eventId) ? -1 : BigInt(a.eventId) > BigInt(b.eventId) ? 1 : 0);
       for (const event of sorted) {
         if (BigInt(event.eventId) <= BigInt(state.cursor)) continue;
+        if (['editedMessage', 'deletedMessage'].includes(event.type) && validMessageId(event.payload?.msgId) && validMessageId(event.payload?.chat?.chatId)) {
+          const change = event.payload;
+          for (const original of state.pending) {
+            const p = original.event.payload;
+            if (original.started || original.event.type !== 'newMessage' || p?.chat?.chatId !== change.chat.chatId || String(p.msgId) !== String(change.msgId)) continue;
+            if (event.type === 'deletedMessage') original.cancelledBy = event.eventId;
+            else if (!original.cancelledBy && typeof p.from?.userId === 'string' && p.from.userId === change.from?.userId && p.chat.type === change.chat.type && typeof change.text === 'string') {
+              // Keep the authenticated routing/parent identity. Missing parts do
+              // not resurrect attachments removed by an edit.
+              original.event.payload = { ...p, text: change.text, parts: Array.isArray(change.parts) ? change.parts : [] };
+            }
+          }
+        }
         state.pending.push({ event, attempts: 0 });
         state.cursor = event.eventId;
       }
