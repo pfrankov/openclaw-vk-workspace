@@ -3,6 +3,8 @@ import { mkdir, open, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { atomicWrite, resolveStateDir, syncDirectory } from './state.js';
 import { isRecord } from './config.js';
+import { identifiers } from './api.js';
+import { displayedText } from './format.js';
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_MESSAGES = 1000;
@@ -32,7 +34,8 @@ export class MessageStore {
           for (const [key, entry] of Object.entries(state.messages)) {
             if (!isRecord(entry) || typeof entry.chatId !== 'string' || typeof entry.messageId !== 'string' ||
                 key !== keyOf(entry.chatId, entry.messageId) || !Number.isFinite(entry.createdAt) ||
-                !['text', 'file', 'voice'].includes(entry.kind) || typeof entry.revision !== 'string' || !entry.revision ||
+                !['text', 'file', 'voice', 'forward'].includes(entry.kind) || typeof entry.revision !== 'string' || !entry.revision ||
+                (entry.deletePending !== undefined && typeof entry.deletePending !== 'boolean') ||
                 !Array.isArray(entry.callbacks) || entry.callbacks.length > 80 || entry.callbacks.some((callback) =>
                   !isRecord(callback) || !/^ocw:[A-Za-z0-9_-]{24}$/.test(callback.token) ||
                   typeof callback.data !== 'string' || !callback.data || Buffer.byteLength(callback.data) > 256 ||
@@ -72,7 +75,7 @@ export class MessageStore {
     // disarms the old menu; it must not retain authority for buttons no longer displayed.
     const result = await this.#transaction(async (messages) => {
       const entry = messages[keyOf(chatId, messageId)];
-      if (!entry || entry.kind !== 'text') throw new Error('Only tracked bot text messages can be edited (retention: 7 days / 1000 messages)');
+      if (!entry || entry.kind !== 'text' || entry.deletePending) throw new Error('Only tracked bot text messages can be edited (retention: 7 days / 1000 messages)');
       try {
         const patch = await update(structuredClone(entry));
         messages[keyOf(chatId, messageId)] = { ...entry, ...patch, revision: randomUUID(), createdAt: this.now() };
@@ -85,17 +88,47 @@ export class MessageStore {
     });
     if (result.error) throw result.error;
   }
+  prepareDelete(chatId, messageId, authorize) { return this.prepareDeleteMany(chatId, [messageId], authorize); }
+  prepareDeleteMany(chatId, messageIds, authorize) {
+    const ids = identifiers(messageIds);
+    return this.#transaction((messages) => {
+      const entries = ids.map((id) => {
+        const entry = messages[keyOf(chatId, id)];
+        if (!entry) throw new Error('Only tracked bot messages can be deleted (retention: 7 days / 1000 messages)');
+        if (entry.deletePending) throw new Error('Deletion outcome is uncertain; inspect the message in VK Teams');
+        authorize(structuredClone(entry));
+        return entry;
+      });
+      // Validate every receipt before fencing any. Commit all fences before I/O.
+      for (const entry of entries) {
+        entry.deletePending = true; entry.callbacks = []; entry.keyboard = []; entry.revision = randomUUID();
+      }
+    });
+  }
+  forget(chatId, messageId) { return this.forgetMany(chatId, [messageId]); }
+  forgetMany(chatId, messageIds) {
+    return this.#transaction((messages) => { for (const id of messageIds) delete messages[keyOf(chatId, id)]; });
+  }
+  observeEdit(chatId, messageId, text) {
+    return this.#transaction((messages) => {
+      const entry = messages[keyOf(chatId, messageId)];
+      if (!entry || entry.deletePending || displayedText(entry) === text) return;
+      // A changed visible message cannot retain authority for its old menu.
+      entry.callbacks = []; entry.keyboard = []; entry.revision = randomUUID();
+      if (typeof text === 'string') { entry.text = text; delete entry.parseMode; delete entry.format; }
+    });
+  }
   lookup(chatId, messageId, token, senderId) {
     return this.#transaction((messages) => {
       const entry = messages[keyOf(chatId, messageId)];
-      const callback = entry?.callbacks.find((item) => item.token === token && item.expiresAt > this.now() && (!item.ownerId || item.ownerId === senderId));
+      const callback = !entry?.deletePending && entry?.callbacks.find((item) => item.token === token && item.expiresAt > this.now() && (!item.ownerId || item.ownerId === senderId));
       return callback?.data ?? null;
     });
   }
   consume(chatId, messageId, token, senderId) {
     return this.#transaction((messages) => {
       const entry = messages[keyOf(chatId, messageId)];
-      const callback = entry?.callbacks.find((item) => item.token === token && item.expiresAt > this.now() && (!item.ownerId || item.ownerId === senderId));
+      const callback = !entry?.deletePending && entry?.callbacks.find((item) => item.token === token && item.expiresAt > this.now() && (!item.ownerId || item.ownerId === senderId));
       if (!callback) return null;
       // One choice consumes the whole menu before dispatch. Repeated clicks cannot repeat a turn.
       entry.revision = randomUUID(); entry.callbacks = []; entry.keyboard = [];

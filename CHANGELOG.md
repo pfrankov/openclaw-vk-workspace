@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Дополнен общий контракт SDK: нативные диапазоны форматирования, несколько цитат, атомарная проверка пакетного удаления, callback-уведомления и явное снятие активности.
+- Уже полученные изменения/удаления применяются только к не начатым заданиям; изменение видимого текста ответа обезвреживает старое меню без повторного запуска агента.
+
+### Added
+
+- Native forwarding, deletion of tracked bot replies, opt-in pins, bounded chat/member information, thread creation and single-field owner-only chat updates. Validate trusted account/conversation scope and platform custody at execution, not only discovery.
+- Native `parent_topic` routing with parent permission/binding inheritance, separate thread sessions and thread-native reply targets; no implicit delivery to the parent chat.
+- Bounded forwarded/quoted context with author labels and `contextVisibility`, plus optional verified image previews without third-party STT or signed URL exposure.
+- API and security regressions, and packed real-SDK smoke coverage for the new actions and inbound behavior. Document checked sources, unavailable live specification, configuration and deliberately unsupported administrative scope.
+
+### Fixed
+
+- Keep third-party text out of control-command and mention inputs. Hidden context also hides nested media and reply metadata.
+- Persist a deletion fence and disarm callback menus before platform I/O; uncertain deletion is not retried, and native deletion events clear only the matching receipt.
+
 ## [0.1.11] - 2026-09-19
 
 ### Fixed

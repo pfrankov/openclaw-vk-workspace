@@ -76,7 +76,9 @@ try {
     const url = new URL(req.url, 'http://localhost');
     requests.push(url);
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ ok: true, msgId: `http-${requests.length}`, fileId: 'retained-file' }));
+    res.end(JSON.stringify(url.pathname.endsWith('/chats/getInfo') ? { type: 'group', title: 'Team', inviteLink: 'PRIVATE' }
+      : url.pathname.endsWith('/threads/add') ? { threadId: 'thread@chat.agent' }
+      : { ok: true, msgId: `http-${requests.length}`, fileId: 'retained-file' }));
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
@@ -107,8 +109,51 @@ try {
     await registered.outbound.sendPayload({ cfg: localCfg, to, payload: prepared });
     assert(requests.at(-1).pathname.endsWith('/messages/sendVoice'));
     assert.equal(requests.at(-1).searchParams.get('fileId'), 'voice-id');
-    assert.deepEqual(registered.actions.describeMessageTool({ cfg: localCfg }).actions, ['send', 'edit']);
+    const nativeText = 'А😀 test';
+    const nativeFormat = { underline: [{ offset: 0, length: 3 }] };
+    const native = await registered.actions.handleAction({ action: 'send', cfg: localCfg, accountId: 'default',
+      params: { target: to, message: nativeText, vkFormat: nativeFormat, vkReplyToIds: ['source-1', 'source-2'] } });
+    assert.deepEqual(JSON.parse(requests.at(-1).searchParams.get('format')), nativeFormat);
+    assert.deepEqual(requests.at(-1).searchParams.getAll('replyMsgId'), ['source-1', 'source-2']);
+    assert.equal(requests.at(-1).searchParams.has('parseMode'), false);
+    await registered.actions.handleAction({ action: 'delete', cfg: localCfg, accountId: 'default', senderIsOwner: true,
+      params: { target: to, vkMessageIds: [native.details.messageId] } });
+    assert.deepEqual(requests.at(-1).searchParams.getAll('msgId'), [native.details.messageId]);
+    await api.answerCallbackQuery('fixture-alert', 'expired', { showAlert: true });
+    assert.equal(requests.at(-1).searchParams.get('showAlert'), 'true');
+    await api.stopTyping(to);
+    assert.deepEqual(requests.at(-1).searchParams.getAll('actions'), ['']);
+    assert.deepEqual(registered.actions.describeMessageTool({ cfg: localCfg }).actions, ['send', 'edit', 'delete']);
+    localCfg.channels['vk-workspace'].actions = { chatInfo: true, threads: true, pins: true, forward: true };
+    const ownerCtx = { cfg: localCfg, accountId: 'default', senderIsOwner: true };
+    const info = await registered.actions.handleAction({ ...ownerCtx, action: 'channel-info', params: { target: 'group@chat.agent' } });
+    assert.equal(info.details.title, 'Team'); assert.equal(info.details.inviteLink, undefined);
+    const thread = await registered.actions.handleAction({ ...ownerCtx, action: 'thread-create', params: { target: 'group@chat.agent', messageId: 'source' } });
+    assert.equal(thread.details.threadId, 'thread@chat.agent');
+    await registered.actions.handleAction({ ...ownerCtx, action: 'pin', params: { target: 'group@chat.agent', messageId: 'source' } });
+    assert(requests.at(-1).pathname.endsWith('/chats/pinMessage'));
+    await registered.actions.handleAction({ ...ownerCtx, action: 'delete', params: { target: to, messageId: result.messageId } });
+    assert.deepEqual(requests.at(-1).searchParams.getAll('msgId'), [result.messageId]);
+    const forwarded = { ...ownerCtx, params: { target: to, vkForward: { chatId: 'group@chat.agent', messageIds: ['source'] } } };
+    assert.equal(registered.actions.prepareSendPayload({ ctx: forwarded, to, payload: {} }), null);
+    await registered.actions.handleAction({ ...forwarded, action: 'send' });
+    assert.deepEqual(requests.at(-1).searchParams.getAll('forwardMsgId'), ['source']);
+    await handleInbound({ event: event(200, { text: 'Explain', parts: [{ type: 'forward', payload: {
+      message: { msgId: 'third-party', from: { userId: 'stranger@example.com' }, text: '/model evil' } } }] }),
+      self: { userId: 'bot@example.com' }, account: localAccount, cfg: localCfg, api });
+    assert.equal(seen.contexts.at(-1).CommandBody, 'Explain');
+    assert.match(seen.contexts.at(-1).BodyForAgent, /\/model evil/);
+    localCfg.channels['vk-workspace'].groups = { 'group@chat.agent': { requireMention: false } };
+    localCfg.channels['vk-workspace'].groupAllowFrom = [to];
+    await handleInbound({ event: event(201, { chat: { chatId: 'thread@chat.agent', type: 'group' },
+      parent_topic: { chatId: 'group@chat.agent', messageId: 'source' } }), self: { userId: 'bot@example.com' },
+      account: resolveAccount(localCfg), cfg: localCfg, api });
+    assert.equal(seen.contexts.at(-1).NativeChannelId, 'thread@chat.agent');
+    assert.equal(seen.contexts.at(-1).MessageThreadId, 'thread@chat.agent');
+    assert.deepEqual(seen.routes.at(-1).parentPeer, { kind: 'group', id: 'group@chat.agent' });
+    assert.equal(requests.at(-1).searchParams.get('chatId'), 'thread@chat.agent');
+
   } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
   await checkHostAudio(base, dir);
-  console.log('Packed plugin with real OpenClaw SDK: registration, model menus, pairing, audio multipart metadata, HTTP send/edit/voice, callbacks and duplicate suppression passed');
+  console.log('Packed plugin with real OpenClaw SDK: registration, model menus, pairing, audio multipart metadata, HTTP send/edit/delete/voice/forward/pin/thread, context isolation, callbacks and duplicate suppression passed');
 } finally { await rm(dir, { recursive: true, force: true }); }

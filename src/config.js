@@ -13,7 +13,8 @@ const strings = { type: 'array', items: { type: 'string', minLength: 1 }, unique
 const policy = (values) => ({ type: 'string', enum: values });
 const groupSchema = {
   type: 'object', additionalProperties: false,
-  properties: { enabled: boolean, requireMention: boolean, allowFrom: strings, systemPrompt: string },
+  properties: { enabled: boolean, requireMention: boolean, allowFrom: strings, systemPrompt: string,
+    contextVisibility: policy(['all', 'allowlist', 'allowlist_quote']) },
 };
 const accountProperties = {
   enabled: boolean, name: string, baseUrl: string, botToken: string, tokenFile: string,
@@ -21,6 +22,10 @@ const accountProperties = {
   dmPolicy: policy(['pairing', 'allowlist', 'open', 'disabled']), allowFrom: strings,
   groupPolicy: policy(['allowlist', 'open', 'disabled']), groupAllowFrom: strings,
   groups: { type: 'object', additionalProperties: groupSchema },
+  contextVisibility: policy(['all', 'allowlist', 'allowlist_quote']),
+  actions: { type: 'object', additionalProperties: false, properties: {
+    delete: boolean, forward: boolean, pins: boolean, chatInfo: boolean, threads: boolean, chatManagement: boolean,
+  } },
   requireMention: boolean, defaultTo: string, textFormat: policy(['markdown', 'plain']),
   pollTime: { type: 'integer', minimum: 1, maximum: 60 },
   requestTimeoutMs: { type: 'integer', minimum: 1000, maximum: 300000 },
@@ -137,7 +142,7 @@ export function resolveAccount(cfg, requestedId, { env = process.env, readToken 
   const own = section.accounts?.[accountId];
   if (accountId !== DEFAULT_ACCOUNT_ID && !own) throw new Error('Unknown VK Workspace account');
   const { accounts: _accounts, defaultAccount: _default, botToken: rootToken, tokenFile: rootFile, ...shared } = section;
-  const config = { ...shared, ...own };
+  const config = { ...shared, ...own, actions: { delete: true, ...shared.actions, ...own?.actions } };
   // Named accounts inherit policy/URL, never another account's credentials or the default environment token.
   const credentials = own ?? (accountId === DEFAULT_ACCOUNT_ID ? { botToken: rootToken, tokenFile: rootFile } : {});
   if (credentials.botToken && credentials.tokenFile) throw new Error('Set botToken or tokenFile, not both');

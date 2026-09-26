@@ -4,9 +4,9 @@ import { getRuntime } from './runtime.js';
 import { sendPayload } from './send.js';
 import { getMessageStore } from './message-store.js';
 import { ProcessingFailure } from './processing-failure.js';
+import { startActivity } from './activity.js';
 
-const validMessageId = (value) => typeof value === 'number' ? Number.isSafeInteger(value)
-  : typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\x00-\x20\x7f]/.test(value);
+import { supplementalContext, validMessageId } from './context.js';
 
 export function parseMessage(event, self) {
   if (!['newMessage', 'callbackQuery'].includes(event?.type)) return null;
@@ -20,21 +20,23 @@ export function parseMessage(event, self) {
       !p.chat.chatId || !p.from.userId || !validMessageId(p.msgId) ||
       p.from.userId === self.userId || p.from.isBot === true) return null;
   // Missing/unknown chat types never downgrade a group into a DM.
+  const parent = p.parent_topic;
+  if (parent !== undefined && (!isRecord(parent) || typeof parent.chatId !== 'string' ||
+      !validMessageId(parent.chatId) || !validMessageId(parent.messageId) ||
+      parent.chatId === p.chat.chatId || p.chat.type === 'private')) return null;
   const isGroup = p.chat.type !== 'private';
   const parts = Array.isArray(p.parts) ? p.parts : [];
   const candidateReply = parts.find((part) => part?.type === 'reply')?.payload?.message;
   const reply = validMessageId(candidateReply?.msgId) ? candidateReply : undefined;
-  let text = typeof p.text === 'string' ? p.text : '';
-  const forwards = parts.filter((part) => part?.type === 'forward').map((part) => part.payload?.message)
-    .filter((message) => typeof message?.text === 'string');
-  if (forwards.length) text += forwards.map((message) => `\n[Forwarded message]\n${message.text}`).join('');
+  const text = typeof p.text === 'string' ? p.text : '';
   const hasFiles = parts.some((part) => ['file', 'voice', 'sticker'].includes(part?.type) && part.payload?.fileId);
-  if (!text.trim() && !hasFiles && !callback) return null;
+  const hasContext = parts.some((part) => ['forward', 'reply'].includes(part?.type) && isRecord(part.payload?.message));
+  if (!text.trim() && !hasFiles && !hasContext && !callback) return null;
   const wasMentioned = Boolean(callback) || parts.some((part) => part?.type === 'mention' && part.payload?.userId === self.userId) ||
     reply?.from?.userId === self.userId || (typeof p.text === 'string' && p.text.includes(`@[${self.userId}]`));
-  return { chatId: p.chat.chatId, senderId: p.from.userId, messageId: callback ? `callback:${callback.queryId}` : String(p.msgId), isGroup, parts,
+  return { chatId: p.chat.chatId, senderId: p.from.userId, messageId: callback ? `callback:${callback.queryId}` : String(p.msgId), isGroup, parts, parentChatId: parent?.chatId, parentMessageId: parent ? String(parent.messageId) : undefined,
     callback: callback ? { queryId: callback.queryId, token: callback.callbackData, messageId: String(p.msgId) } : undefined,
-    text: text || '[Attachment]', visibleText: typeof p.text === 'string' ? p.text : '', reply, wasMentioned, title: p.chat.title,
+    text: text || (hasFiles ? '[Attachment]' : hasContext ? '[Shared context]' : ''), visibleText: typeof p.text === 'string' ? p.text : '', reply, wasMentioned, title: p.chat.title,
     senderName: [p.from.firstName, p.from.lastName].filter(Boolean).join(' ') || p.from.userId,
     timestamp: Number.isFinite(p.timestamp) ? p.timestamp * 1000 : Date.now() };
 }
@@ -42,6 +44,16 @@ export function parseMessage(event, self) {
 export function checkAccess(message, account, paired = []) {
   const { config } = account;
   if (!account.enabled) return { allowed: false };
+  if (message.isGroup && message.parentChatId) {
+    const parentAccess = checkAccess({ ...message, chatId: message.parentChatId, parentChatId: undefined }, account);
+    if (!parentAccess.allowed) return parentAccess;
+    const own = config.groups?.[message.chatId];
+    if (own?.enabled === false || (config.groupPolicy === 'allowlist' && own?.allowFrom && !matchesAllowFrom(own.allowFrom, message.senderId))) return { allowed: false };
+    const allowFrom = own?.allowFrom ? parentAccess.allowFrom.includes('*') ? own.allowFrom
+      : parentAccess.allowFrom.filter((id) => matchesAllowFrom(own.allowFrom, id)) : parentAccess.allowFrom;
+    return { ...parentAccess, allowFrom, group: { ...parentAccess.group, ...own },
+      requireMention: own?.requireMention ?? parentAccess.requireMention };
+  }
   if (message.isGroup) {
     const specific = config.groups?.[message.chatId];
     const fallback = config.groups?.['*'];
@@ -62,12 +74,21 @@ export function checkAccess(message, account, paired = []) {
 export async function handleInbound({ event, self, account, cfg, api, signal, log, setStatus, messageStore }) {
   signal?.throwIfAborted();
   cfg = { ...cfg, session: { ...cfg.session, dmScope: cfg.session?.dmScope ?? 'per-account-channel-peer' } };
+  if (['deletedMessage', 'editedMessage'].includes(event?.type)) {
+    const payload = event.payload;
+    if (isRecord(payload) && validMessageId(payload.chat?.chatId) && validMessageId(payload.msgId)) {
+      const receipts = messageStore ?? getMessageStore(getRuntime().core, account);
+      if (event.type === 'deletedMessage') await receipts.forget(payload.chat.chatId, String(payload.msgId));
+      else if (typeof payload.text === 'string') await receipts.observeEdit(payload.chat.chatId, String(payload.msgId), payload.text);
+    }
+    return;
+  }
   const message = parseMessage(event, self);
   if (!message) return;
   const { core, sdk } = getRuntime();
-  const answer = async (text) => {
+  const answer = async (text, showAlert = true) => {
     if (message.callback) {
-      try { await api.answerCallbackQuery(message.callback.queryId, text, { signal }); }
+      try { await api.answerCallbackQuery(message.callback.queryId, text, { signal, showAlert }); }
       catch { log?.('VK Workspace callback acknowledgement failed'); }
     }
   };
@@ -91,7 +112,7 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
     if (!text) { await answer('This menu has expired, was already used, or belongs to another user.'); return; }
     message.text = text; message.visibleText = text;
   }
-  const hasCommand = core.channel.text.hasControlCommand(message.text, cfg);
+  const hasCommand = core.channel.text.hasControlCommand(message.visibleText, cfg);
   const commandGate = sdk.commandGate({ useAccessGroups: cfg.commands?.useAccessGroups !== false,
     allowTextCommands: core.channel.commands.shouldHandleTextCommands({ cfg, surface: CHANNEL_ID }),
     hasControlCommand: hasCommand,
@@ -103,10 +124,11 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
   let media;
   let preflightTranscript;
   const mediaParts = message.parts.filter((part) => ['file', 'voice', 'sticker'].includes(part?.type) && part.payload?.fileId);
-  const voiceOnly = !message.visibleText.trim() && mediaParts.length === 1 && mediaParts[0].type === 'voice';
+  const voiceOnly = !message.visibleText.trim() && mediaParts.length === 1 && mediaParts[0].type === 'voice' && !message.parts.some((part) => ['forward', 'reply'].includes(part?.type));
   if (message.isGroup && access.requireMention && !mentioned && !(hasCommand && commandGate.commandAuthorized) && voiceOnly && mentionRegexes.length) {
     route = core.channel.routing.resolveAgentRoute({ cfg, channel: CHANNEL_ID, accountId: account.accountId,
-      peer: { kind: 'group', id: message.chatId } });
+      peer: { kind: 'group', id: message.chatId },
+      ...(message.parentChatId ? { parentPeer: { kind: 'group', id: message.parentChatId } } : {}) });
     media = await inboundMedia(message.parts, { api, account, core, signal });
     const mediaFacts = sdk.mediaFacts(media, { messageId: message.messageId });
     const preflightCtx = { Provider: CHANNEL_ID, Surface: CHANNEL_ID, OriginatingChannel: CHANNEL_ID,
@@ -116,6 +138,7 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
     mentioned = Boolean(preflightTranscript && core.channel.mentions.matchesMentionPatterns(preflightTranscript, mentionRegexes));
     if (mentioned) {
       message.text = sdk.formatAudioTranscript(preflightTranscript);
+      message.visibleText = message.text;
       media = preflightCtx.media;
     }
   }
@@ -125,22 +148,36 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
     signal?.throwIfAborted();
     const accepted = await store.consume(message.chatId, message.callback.messageId, message.callback.token, message.senderId);
     if (accepted !== message.text) { await answer('This menu is no longer active.'); return; }
-    await answer('Accepted');
+    await answer('Accepted', false);
   }
   signal?.throwIfAborted();
   // Authorization runs before downloads. Mention policy runs before downloads except for the
   // bounded voice-only preflight above, which is required to detect a spoken mention.
   route ??= core.channel.routing.resolveAgentRoute({ cfg, channel: CHANNEL_ID, accountId: account.accountId,
-    peer: { kind: message.isGroup ? 'group' : 'direct', id: message.chatId } });
+    peer: { kind: message.isGroup ? 'group' : 'direct', id: message.chatId },
+    ...(message.parentChatId ? { parentPeer: { kind: 'group', id: message.parentChatId } } : {}) });
+  const supplemental = supplementalContext(message.parts, { selfId: self.userId, isGroup: message.isGroup,
+    visibility: access.group?.contextVisibility ?? account.config.contextVisibility ?? cfg.channels?.defaults?.contextVisibility ?? 'all',
+    allowFrom: access.allowFrom });
+  const commandBody = message.visibleText || (mediaParts.length ? '[Attachment]' : '[Shared context]');
+  if (!message.visibleText.trim() && !mediaParts.length && !supplemental.text && !message.callback) return;
+  let agentBody = message.text + supplemental.text;
   const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId });
   media ??= await inboundMedia(message.parts, { api, account, core, signal });
+  signal?.throwIfAborted();
+  if (supplemental.images.length && media.length < 10) {
+    const imageParts = supplemental.images.slice(0, 10 - media.length);
+    const previews = await inboundMedia(imageParts, { api, account, core, signal, imageOnly: true });
+    media = [...media, ...previews];
+    if (previews.length < imageParts.length) agentBody += '\n[Some shared attachment previews are unavailable or are not supported images]';
+  }
   signal?.throwIfAborted();
   const from = `${CHANNEL_ID}:${message.isGroup ? 'chat:' : ''}${message.chatId}`;
   const ctx = core.channel.reply.finalizeInboundContext({
     Body: core.channel.reply.formatAgentEnvelope({ channel: 'VK Workspace', from,
       timestamp: message.timestamp, previousTimestamp: core.channel.session.readSessionUpdatedAt({ storePath, sessionKey: route.sessionKey }),
-      envelope: core.channel.reply.resolveEnvelopeFormatOptions(cfg), body: message.text }),
-    BodyForAgent: message.text, RawBody: message.text, CommandBody: message.text,
+      envelope: core.channel.reply.resolveEnvelopeFormatOptions(cfg), body: agentBody }),
+    BodyForAgent: agentBody, RawBody: commandBody, CommandBody: commandBody,
     From: from, To: `${CHANNEL_ID}:${message.chatId}`, SessionKey: route.sessionKey, AccountId: account.accountId,
     ChatType: message.isGroup ? 'group' : 'direct', ConversationLabel: message.title || from,
     SenderId: message.senderId, SenderName: message.senderName,
@@ -148,7 +185,8 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
     Provider: CHANNEL_ID, Surface: CHANNEL_ID, OriginatingChannel: CHANNEL_ID, OriginatingTo: `${CHANNEL_ID}:${message.chatId}`,
     MessageSid: message.messageId, Timestamp: message.timestamp, WasMentioned: mentioned,
     CommandAuthorized: commandGate.commandAuthorized,
-    ReplyToId: message.reply?.msgId, ReplyToBody: message.reply?.text,
+    ReplyToId: supplemental.reply?.msgId, ReplyToBody: supplemental.reply?.text, ReplyToSender: supplemental.reply?.sender,
+    NativeChannelId: message.chatId, MessageThreadId: message.parentChatId ? message.chatId : undefined,
     media: media.length ? sdk.mediaFacts(media, { messageId: message.messageId }) : undefined,
   });
   await core.channel.session.recordInboundSession({ storePath, ctx, sessionKey: route.sessionKey,
@@ -160,11 +198,7 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
   const { onModelSelected, ...prefix } = sdk.replyPrefix({ cfg, agentId: route.agentId, channel: CHANNEL_ID, accountId: account.accountId });
   let deliveryFailure;
   let settled = false;
-  const typing = () => !settled && !signal?.aborted
-    ? api.sendTyping(message.chatId, { signal }).catch(() => {}) : Promise.resolve();
-  void typing();
-  const timer = setInterval(() => { void typing(); }, 8000);
-  timer.unref?.();
+  const stopActivity = startActivity(api, message.chatId, signal);
   try {
     await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({ ctx, cfg,
       dispatcherOptions: { ...prefix,
@@ -193,5 +227,5 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
     if (error instanceof ProcessingFailure) throw error;
     throw deliveryFailure ?? new ProcessingFailure('agent-dispatch', 'reply-failed',
       'OpenClaw reply processing failed; inspect Gateway provider logs for the matching event');
-  } finally { settled = true; clearInterval(timer); }
+  } finally { settled = true; await stopActivity(); }
 }

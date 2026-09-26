@@ -155,7 +155,14 @@ export async function loadOutboundMedia(input, { account, core, mediaLocalRoots,
   return { ...result, buffer: Buffer.from(result.buffer), fileName: safeFileName(result.fileName) };
 }
 
-export async function inboundMedia(parts, { api, account, core, signal }) {
+function sniffImage(buffer) {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii'))) return 'image/gif';
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+}
+
+export async function inboundMedia(parts, { api, account, core, signal, imageOnly = false }) {
   signal?.throwIfAborted();
   const files = parts.filter((part) => ['file', 'voice', 'sticker'].includes(part?.type) && typeof part.payload?.fileId === 'string');
   if (files.length > 10) throw new ProcessingFailure('media-metadata', 'attachment-limit',
@@ -163,35 +170,50 @@ export async function inboundMedia(parts, { api, account, core, signal }) {
   const media = [];
   for (const part of files) {
     signal?.throwIfAborted();
-    let info;
-    try { info = await api.getFileInfo(part.payload.fileId, { signal }); }
-    catch {
+    if (imageOnly && part.type === 'voice') continue;
+    try {
+      let info;
+      try { info = await api.getFileInfo(part.payload.fileId, { signal }); }
+      catch {
+        signal?.throwIfAborted();
+        throw new ProcessingFailure('media-metadata', 'api-failed', 'files/getInfo failed for the attachment');
+      }
       signal?.throwIfAborted();
-      throw new ProcessingFailure('media-metadata', 'api-failed', 'files/getInfo failed for the attachment');
-    }
-    signal?.throwIfAborted();
-    if (!info || typeof info.url !== 'string' || (typeof info.size === 'number' && info.size > maxBytesFor(account))) {
-      throw new ProcessingFailure('media-metadata', 'invalid', 'Attachment metadata is invalid or exceeds the size limit (mediaMaxMb)');
-    }
-    // Do not forward signed URLs into the model context. Materialize into the host media store first.
-    const fetched = await downloadTrusted(info.url, account, signal);
-    const sourceName = info.filename || fetched.fileName;
-    let fileName = safeFileName(sourceName);
-    let contentType = fetched.contentType || MIME[extname(fileName).toLowerCase()] || 'application/octet-stream';
-    if (part.type === 'voice') ({ fileName, contentType } = normalizeVoiceMedia({ buffer: fetched.buffer, fileName: sourceName,
-      contentType, declaredType: info.type }));
-    signal?.throwIfAborted();
-    let saved;
-    try { saved = await core.channel.media.saveMediaBuffer(fetched.buffer, contentType, 'inbound', maxBytesFor(account), fileName); }
-    catch {
+      if (!info || typeof info.url !== 'string' || (typeof info.size === 'number' && info.size > maxBytesFor(account))) {
+        throw new ProcessingFailure('media-metadata', 'invalid', 'Attachment metadata is invalid or exceeds the size limit (mediaMaxMb)');
+      }
+      // Preview only documented image metadata. Filenames, a user's declared
+      // part.type and a CDN's Content-Type cannot turn third-party audio into STT.
+      if (imageOnly && !(info.type === 'image' || (typeof info.type === 'string' && info.type.startsWith('image/')))) continue;
+      const fetched = await downloadTrusted(info.url, account, signal);
+      const sourceName = info.filename || fetched.fileName;
+      let fileName = safeFileName(sourceName);
+      let contentType = fetched.contentType || MIME[extname(fileName).toLowerCase()] || 'application/octet-stream';
+      if (imageOnly) {
+        contentType = sniffImage(fetched.buffer);
+        if (!contentType) continue;
+        const suffix = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' }[contentType];
+        fileName = `${fileName.slice(0, 180 - suffix.length).replace(/[\uD800-\uDBFF]$/, '')}${suffix}`;
+      } else if (part.type === 'voice') ({ fileName, contentType } = normalizeVoiceMedia({ buffer: fetched.buffer, fileName: sourceName,
+        contentType, declaredType: info.type }));
       signal?.throwIfAborted();
-      throw new ProcessingFailure('media-store', 'write-failed', 'OpenClaw could not store the inbound attachment');
+      let saved;
+      try { saved = await core.channel.media.saveMediaBuffer(fetched.buffer, contentType, 'inbound', maxBytesFor(account), fileName); }
+      catch {
+        signal?.throwIfAborted();
+        throw new ProcessingFailure('media-store', 'write-failed', 'OpenClaw could not store the inbound attachment');
+      }
+      signal?.throwIfAborted();
+      media.push({ path: saved.path, contentType: imageOnly || part.type === 'voice' ? contentType : saved.contentType || contentType, fileName,
+        kind: imageOnly ? 'image' : part.type === 'voice' ? 'audio' : part.type === 'sticker' ? 'sticker'
+          : contentType.startsWith('image/') ? 'image' : contentType.startsWith('audio/') ? 'audio'
+            : contentType.startsWith('video/') ? 'video' : 'document' });
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Optional reference previews must not quarantine an otherwise valid turn.
+      // Own attachments keep their existing fail-closed diagnostics/recovery.
+      if (!imageOnly) throw error;
     }
-    signal?.throwIfAborted();
-    media.push({ path: saved.path, contentType: part.type === 'voice' ? contentType : saved.contentType || contentType, fileName,
-      kind: part.type === 'voice' ? 'audio' : part.type === 'sticker' ? 'sticker'
-        : contentType.startsWith('image/') ? 'image' : contentType.startsWith('audio/') ? 'audio'
-          : contentType.startsWith('video/') ? 'video' : 'document' });
   }
   return media;
 }

@@ -27,6 +27,10 @@ export const channelPlugin = {
   agentPrompt: { messageToolHints: () => [
     'VK Workspace: message(action=send) accepts vkButtons (rows of text/url or text/callbackData), vkFileId, vkVoice and vkTextFormat.',
     'message(action=edit) updates a tracked bot text message by messageId. Omit text to change only buttons; vkButtons: [] removes a menu.',
+    'Native threads are separate conversations: use the thread id as target, never its parent chat. Forwarding requires actions.forward and vkForward: {chatId, messageIds}.',
+    'delete removes tracked bot replies. Opt-in channel-info/member-info return bounded metadata; pin/unpin/channel-edit require a trusted owner. thread-create returns a native threadId.',
+    'Use vkReplyToIds to quote several messages; delete accepts vkMessageIds for multiple tracked bot replies. Both are limited to 20 IDs.',
+    'vkFormat applies validated native ranges to literal message text. Do not combine it with Markdown; ranges use UTF-16 offsets.',
     'Callbacks are single-use, expire after 24 hours and follow sender access rules. They are not native execution approvals.',
   ] },
   pairing: {

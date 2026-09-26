@@ -93,3 +93,10 @@ export function formatText(value, { mode = 'markdown', limit = 4096 } = {}) {
   }
   finish(); return chunks;
 }
+
+// Only decode our own generated HTML receipts; never interpret inbound HTML.
+export function displayedText(entry) {
+  if (entry.parseMode !== 'HTML' || typeof entry.text !== 'string') return entry.text;
+  return entry.text.replace(/<\/?(?:b|i|s|a|pre|code)\b[^>]*>/g, '')
+    .replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&amp;', '&');
+}

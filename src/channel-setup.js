@@ -8,7 +8,7 @@ export const meta = {
   blurb: 'VK Teams bot over long polling; cloud or an on-premises Bot API endpoint.',
   systemImage: 'message.fill', quickstartAllowFrom: true, markdownCapable: true,
 };
-export const capabilities = { chatTypes: ['direct', 'group'], media: true, threads: false,
+export const capabilities = { chatTypes: ['direct', 'group'], media: true, threads: true,
   reactions: false, nativeCommands: false, blockStreaming: true, edit: true, reply: true,
   tts: { voice: { synthesisTarget: 'voice-note', transcodesAudio: false, audioFileFormats: ['aac', 'ogg', 'm4a'], captionedFinalText: false } } };
 const describe = (account) => ({ accountId: account.accountId, name: account.name, enabled: account.enabled,
