@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.13] - 2026-10-03
+## [0.1.14] - 2026-10-03
 
 ### Fixed
 
@@ -9,11 +9,19 @@
 
 ### Release
 
+- Compare browser CRLF and file LF release notes consistently without ignoring changes to prose or spaces. Version 0.1.13 stopped at this check before npm publication; its prerelease tag is retained.
+
 - Reuse an existing matching GitHub prerelease created with the tag, without overwriting its notes or assets. Validate its exact tag, commit, title and notes before npm publication.
 
 ### Scope
 
 - Send routing, payload normalization and delivery recovery are unchanged. The pinned host can still create requester-less receipts through the message tool. Ordinary inbound senders cannot edit or delete those replies; a trusted owner is required. Callback ownership does not establish message ownership, and existing receipts are not retroactively attributed.
+
+## [0.1.13] - 2026-10-03
+
+### Release status
+
+- GitHub prerelease only; not published to npm. The release-note guard rejected browser CRLF line endings before the publish step. Superseded by 0.1.14 without rewriting the existing tag.
 
 ## [0.1.12] - 2026-09-26
 

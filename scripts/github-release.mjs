@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+const comparableNotes = (text) => text.replace(/\r\n/g, '\n').replace(/\n$/, '');
+
 // A tag created in the GitHub release form already has a release. Reuse it only
 // when it matches this checked-out release; never overwrite notes or assets.
 export function ensureGitHubRelease({ phase, tag, head, notesPath, notes, repository }, run = execFileSync) {
@@ -26,7 +28,7 @@ export function ensureGitHubRelease({ phase, tag, head, notesPath, notes, reposi
     assert.equal(release.target_commitish, head, 'Existing release must target this exact commit');
     assert.equal(release.name, tag, 'Release title mismatch');
     assert.equal(release.draft, false, 'Existing release must be published');
-    assert.equal(release.body.trimEnd(), notes.trimEnd(), 'Existing release notes differ; refusing to overwrite');
+    assert.equal(comparableNotes(release.body), comparableNotes(notes), 'Existing release notes differ; refusing to overwrite');
     return 'existing';
   }
   if (phase === 'create') {
