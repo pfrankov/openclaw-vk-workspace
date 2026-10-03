@@ -1,11 +1,15 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.13] - 2026-10-03
 
 ### Fixed
 
 - Reject inbound-sender edits when a tracked bot reply has no recorded requester. Denied edits leave the text and callback menu unchanged; matching recorded senders and trusted owners retain their existing access.
 - Add local HTTP regressions and a packed-plugin smoke with OpenClaw 2026.9.3 for prepared sends whose outbound context omits requester identity.
+
+### Release
+
+- Reuse an existing matching GitHub prerelease created with the tag, without overwriting its notes or assets. Validate its exact tag, commit, title and notes before npm publication.
 
 ### Scope
 
