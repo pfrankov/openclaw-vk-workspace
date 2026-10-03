@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TeamsApi, ApiError } from '../src/api.js';
 import { messageActions } from '../src/actions.js';
+import { channelPlugin } from '../src/channel.js';
 import { channelData, sendPayload, editMessage } from '../src/send.js';
 import { getMessageStore, MessageStore } from '../src/message-store.js';
 import { prepareKeyboard } from '../src/keyboard.js';
@@ -33,6 +34,43 @@ async function fixture(t, handler, settings = {}) {
     run: (action, params = {}, extra = {}) => messageActions.handleAction({ ...ctx, action, params: { target: CHAT, ...params }, ...extra }) };
 }
 const menu = () => prepareKeyboard([[{ text: 'Yes', callbackData: 'yes' }]], USER);
+
+test('prepared-send receipts without sender provenance cannot be edited by ordinary chat senders', async (t) => {
+  const f = await fixture(t);
+  const params = { target: CHAT, message: 'Choose', vkButtons: [[{ text: 'Yes', callbackData: 'yes' }]] };
+  const payload = messageActions.prepareSendPayload({ ctx: { ...f.ctx, params }, to: CHAT, payload: { text: params.message } });
+  // OpenClaw 2026.9.3's outbound context carries no requesterSenderId. A menu's
+  // owner is a callback restriction, not proof of receipt ownership.
+  const result = await channelPlugin.outbound.sendPayload({ cfg: f.cfg, accountId: 'default', to: CHAT, payload });
+  const entry = await f.store.get(CHAT, result.messageId);
+  assert.equal(entry.requesterId, undefined);
+  assert.equal(entry.callbacks[0].ownerId, USER);
+  for (const requesterSenderId of [USER, 'other@example.com']) {
+    await assert.rejects(f.run('edit', { messageId: result.messageId, message: 'Changed',
+      vkButtons: [[{ text: 'New', callbackData: 'new' }]], senderIsOwner: true }, { requesterSenderId }), /another sender/);
+    assert.deepEqual(await f.store.get(CHAT, result.messageId), entry);
+  }
+  await assert.rejects(f.run('delete', { messageId: result.messageId }), /another sender/);
+  assert.equal(f.requests.length, 1);
+  assert.equal(await f.store.lookup(CHAT, result.messageId, entry.callbacks[0].token, USER), 'yes');
+  await f.run('edit', { messageId: result.messageId, message: 'Owner update' }, { senderIsOwner: true });
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.requests.at(-1).url.pathname, '/bot/v1/messages/editText');
+  assert.equal((await f.store.get(CHAT, result.messageId)).text, 'Owner update');
+});
+
+test('trusted sender-owned receipts remain editable by their sender and by the owner', async (t) => {
+  const f = await fixture(t);
+  const sent = await f.run('send', { message: 'Original' });
+  const messageId = sent.details.messageId;
+  assert.equal((await f.store.get(CHAT, messageId)).requesterId, USER);
+  await f.run('edit', { messageId, message: 'Sender update' });
+  await assert.rejects(f.run('edit', { messageId, message: 'Other update' }, { requesterSenderId: 'other@example.com' }), /another sender/);
+  assert.equal(f.requests.length, 2);
+  await f.run('edit', { messageId, message: 'Owner update' }, { requesterSenderId: 'other@example.com', senderIsOwner: true });
+  await f.run('delete', { messageId });
+  assert.equal(await f.store.get(CHAT, messageId), undefined);
+});
 
 test('new operations are scoped by account flags, never by model-provided owner fields', async (t) => {
   const f = await fixture(t, undefined, { actions: {} });

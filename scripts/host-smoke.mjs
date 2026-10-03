@@ -69,6 +69,7 @@ try {
   const metadata = JSON.parse(await readFile(join(base, 'openclaw.plugin.json'), 'utf8'));
   assert.deepEqual(registered.configSchema.schema, metadata.channelConfigs['vk-workspace'].schema);
   const { sendPayload } = await import(pathToFileURL(join(base, 'dist/send.js')));
+  const { getMessageStore } = await import(pathToFileURL(join(base, 'dist/message-store.js')));
   const { TeamsApi } = await import(pathToFileURL(join(base, 'dist/api.js')));
   const requests = [];
   const server = createServer(async (req, res) => {
@@ -109,6 +110,24 @@ try {
     await registered.outbound.sendPayload({ cfg: localCfg, to, payload: prepared });
     assert(requests.at(-1).pathname.endsWith('/messages/sendVoice'));
     assert.equal(requests.at(-1).searchParams.get('fileId'), 'voice-id');
+    const senderCtx = { cfg: localCfg, accountId: 'default', requesterAccountId: 'default', requesterSenderId: to,
+      toolContext: { currentChannelProvider: 'vk-workspace', currentChannelId: to } };
+    const senderPayload = registered.actions.prepareSendPayload({ to, payload: { text: 'Prepared menu' },
+      ctx: { ...senderCtx, params: { vkButtons: [[{ text: 'Yes', callbackData: 'yes' }]] } } });
+    // Match the pinned SDK's outbound context: requester identity is not forwarded.
+    const senderReceipt = await registered.outbound.sendPayload({ cfg: localCfg, accountId: 'default', to, payload: senderPayload });
+    const receipts = getMessageStore(core, localAccount);
+    const stored = await receipts.get(to, senderReceipt.messageId);
+    assert.equal(stored.requesterId, undefined);
+    assert.equal(stored.callbacks[0].ownerId, to);
+    const beforeDeniedEdit = requests.length;
+    await assert.rejects(registered.actions.handleAction({ ...senderCtx, action: 'edit',
+      params: { target: to, messageId: senderReceipt.messageId, message: 'Unverified edit', vkButtons: [] } }), /another sender/);
+    assert.equal(requests.length, beforeDeniedEdit);
+    assert.deepEqual(await receipts.get(to, senderReceipt.messageId), stored);
+    await registered.actions.handleAction({ ...senderCtx, senderIsOwner: true, action: 'edit',
+      params: { target: to, messageId: senderReceipt.messageId, message: 'Owner edit' } });
+    assert(requests.at(-1).pathname.endsWith('/messages/editText'));
     const nativeText = 'А😀 test';
     const nativeFormat = { underline: [{ offset: 0, length: 3 }] };
     const native = await registered.actions.handleAction({ action: 'send', cfg: localCfg, accountId: 'default',
