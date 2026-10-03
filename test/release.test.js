@@ -67,3 +67,20 @@ test('a draft on a later page is rejected before publication instead of treated 
   assert.throws(() => ensureGitHubRelease(options, f.run), /must be published/);
   assert.equal(f.calls.length, 2);
 });
+
+test('browser CRLF notes match file LF notes without changing the release', () => {
+  const notes = '## Notes\n\n- First\n- Second\n';
+  const f = fixture([[{ ...existing, body: notes.replace(/\n/g, '\r\n') }]]);
+  assert.equal(ensureGitHubRelease({ ...options, phase: 'create', notes }, f.run), 'existing');
+  assert.equal(f.calls.length, 2);
+  const noFinalNewline = fixture([[{ ...existing, body: options.notes.replace(/\n$/, '') }]]);
+  assert.equal(ensureGitHubRelease(options, noFinalNewline.run), 'existing');
+});
+
+test('line-ending comparison preserves meaningful whitespace and content differences', () => {
+  for (const body of ['Release  notes\r\n', 'Release notes \r\n', 'Release notes\t\r\n', 'Release notes\r\n\r\nExtra']) {
+    const f = fixture([[{ ...existing, body }]]);
+    assert.throws(() => ensureGitHubRelease({ ...options, phase: 'create' }, f.run), /notes differ/);
+    assert.equal(f.calls.length, 2);
+  }
+});
