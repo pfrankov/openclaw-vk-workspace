@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Reject inbound-sender edits when a tracked bot reply has no recorded requester. Denied edits leave the text and callback menu unchanged; matching recorded senders and trusted owners retain their existing access.
+- Add local HTTP regressions and a packed-plugin smoke with OpenClaw 2026.9.3 for prepared sends whose outbound context omits requester identity.
+
+### Scope
+
+- Send routing, payload normalization and delivery recovery are unchanged. The pinned host can still create requester-less receipts through the message tool. Ordinary inbound senders cannot edit or delete those replies; a trusted owner is required. Callback ownership does not establish message ownership, and existing receipts are not retroactively attributed.
+
 ## [0.1.12] - 2026-09-26
 
 ### Добавлено

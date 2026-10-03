@@ -127,7 +127,7 @@ export async function editMessage(to, messageId, payload, options = {}) {
     : nativeChunks(payload.text, data.format);
   if (chunks && chunks.length !== 1) throw new Error('An edit must fit one non-empty message; it is never truncated');
   await store.edit(target, messageId, async (entry) => {
-    if (options.requesterSenderId && entry.requesterId && options.requesterSenderId !== entry.requesterId && !options.senderIsOwner) throw new Error('Cannot edit another sender\'s bot reply');
+    if (options.requesterSenderId && options.requesterSenderId !== entry.requesterId && !options.senderIsOwner) throw new Error('Cannot edit another sender\'s bot reply');
     const body = chunks?.[0] ?? { text: entry.text, parseMode: entry.parseMode, format: entry.format };
     const menu = data.buttons === undefined ? { keyboard: entry.keyboard, callbacks: entry.callbacks }
       : prepareKeyboard(data.buttons, options.requesterSenderId ?? entry.requesterId ?? data.buttonOwnerId);
