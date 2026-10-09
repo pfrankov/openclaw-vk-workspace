@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Cancel all inbox workers on fatal persistence errors and retain the consumer lock until every handler settles. Started unfinished turns remain available for manual recovery without automatic replay or late sends.
+- Durably disarm old callback menus before editing a bot message. A failed pre-edit write prevents HTTP; failure to save a confirmed edit keeps old tokens disabled and reports an outcome that must not be retried automatically.
+- Read outbound local files through the public OpenClaw safe-file API and validate its result against the original canonical roots. Reject parent/root replacement escapes, hard links and special files; token-file FIFOs also fail without blocking the Gateway.
+- Keep explicit default-account policies and endpoints scoped when setup selects an environment token. Use the host's native environment reference without copying the credential or changing sibling accounts.
+- Send voice-preflight transcript echoes through the cancellable delivery path, including cancellation during session recording and between text chunks. Preserve configured formatting, best-effort delivery and reuse of the existing transcript.
+
+### Tests
+
+- Add disk-failure, restart, authorization and cancellation regressions with real local HTTP. Extend the packed-plugin smoke with genuine OpenClaw 2026.9.3 configuration loading, safe-file boundary checks and preflight-echo cancellation.
+
 ## [0.1.14] - 2026-10-03
 
 ### Fixed

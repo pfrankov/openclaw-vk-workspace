@@ -45,16 +45,19 @@ export class MessageStore {
           if (error.code !== 'ENOENT') throw new Error('VK Workspace message store is unreadable or corrupt');
         }
         for (const [key, entry] of Object.entries(state.messages)) if (this.now() - entry.createdAt >= RETENTION_MS) delete state.messages[key];
-        const result = await fn(state.messages);
-        const entries = Object.entries(state.messages).sort((a, b) => a[1].createdAt - b[1].createdAt);
-        for (const [key] of entries.slice(0, Math.max(0, entries.length - MAX_MESSAGES))) delete state.messages[key];
-        let text = JSON.stringify(state);
-        for (const [key] of entries.slice(0, -1)) {
-          if (Buffer.byteLength(text) <= MAX_BYTES) break;
-          delete state.messages[key]; text = JSON.stringify(state);
-        }
-        if (Buffer.byteLength(text) > MAX_BYTES) throw new Error('VK Workspace message store entry exceeds the size limit');
-        await atomicWrite(this.path, text);
+        const persist = async () => {
+          const entries = Object.entries(state.messages).sort((a, b) => a[1].createdAt - b[1].createdAt);
+          for (const [key] of entries.slice(0, Math.max(0, entries.length - MAX_MESSAGES))) delete state.messages[key];
+          let text = JSON.stringify(state);
+          for (const [key] of entries.slice(0, -1)) {
+            if (Buffer.byteLength(text) <= MAX_BYTES) break;
+            delete state.messages[key]; text = JSON.stringify(state);
+          }
+          if (Buffer.byteLength(text) > MAX_BYTES) throw new Error('VK Workspace message store entry exceeds the size limit');
+          await atomicWrite(this.path, text);
+        };
+        const result = await fn(state.messages, persist);
+        await persist();
         return result;
       } finally {
         if (lease) { await lease.close(); await rm(`${this.path}.lock`, { force: true }); }
@@ -70,23 +73,25 @@ export class MessageStore {
     });
   }
   get(chatId, messageId) { return this.#transaction((messages) => structuredClone(messages[keyOf(chatId, messageId)])); }
-  async edit(chatId, messageId, update) {
-    // Serialize edits and callback consumption across the network call. A failed/ambiguous edit
-    // disarms the old menu; it must not retain authority for buttons no longer displayed.
-    const result = await this.#transaction(async (messages) => {
-      const entry = messages[keyOf(chatId, messageId)];
-      if (!entry || entry.kind !== 'text' || entry.deletePending) throw new Error('Only tracked bot text messages can be edited (retention: 7 days / 1000 messages)');
-      try {
-        const patch = await update(structuredClone(entry));
-        messages[keyOf(chatId, messageId)] = { ...entry, ...patch, revision: randomUUID(), createdAt: this.now() };
-        return {};
-      } catch (error) {
-        if (!error.editAttempted) throw error;
+  async edit(chatId, messageId, prepare, apply) {
+    let applied = false;
+    try {
+      await this.#transaction(async (messages, persist) => {
+        const entry = messages[keyOf(chatId, messageId)];
+        if (!entry || entry.kind !== 'text' || entry.deletePending) throw new Error('Only tracked bot text messages can be edited (retention: 7 days / 1000 messages)');
+        const patch = await prepare(structuredClone(entry));
+        // Authorization and preparation precede this durable fence. Keep the
+        // lock through HTTP so another edit or callback cannot overtake it.
         entry.callbacks = []; entry.keyboard = []; entry.revision = randomUUID();
-        return { error };
-      }
-    });
-    if (result.error) throw result.error;
+        await persist();
+        await apply(patch);
+        applied = true;
+        messages[keyOf(chatId, messageId)] = { ...entry, ...patch, revision: randomUUID(), createdAt: this.now() };
+      });
+    } catch (error) {
+      if (!applied) throw error;
+      throw Object.assign(new Error('VK Workspace edit state could not be saved; inspect the message before retrying'), { noRetry: true, mayHaveSent: true });
+    }
   }
   prepareDelete(chatId, messageId, authorize) { return this.prepareDeleteMany(chatId, [messageId], authorize); }
   prepareDeleteMany(chatId, messageIds, authorize) {

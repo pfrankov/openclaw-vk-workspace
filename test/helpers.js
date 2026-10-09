@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveAccount } from '../src/config.js';
@@ -78,7 +78,17 @@ export function installRuntime({ cfg = config(), payloads = [{ text: 'Ответ
       return { commandAuthorized: authorized, shouldBlock: hasControlCommand && !authorized };
     },
     mediaFacts: (media) => media, replyPrefix: () => ({}), mediaRoots: () => mediaRoots,
+    // Unit reader double only. The packed host smoke verifies the real SDK's root/identity checks.
+    readLocalFileFromRoots: async ({ filePath, maxBytes }) => {
+      try {
+        const info = await stat(filePath);
+        if (!info.isFile() || info.size > maxBytes) return null;
+        const buffer = await readFile(filePath);
+        return buffer.length > maxBytes ? null : { buffer, realPath: filePath };
+      } catch { return null; }
+    },
     audioPreflight: {
+      format: (transcript, format) => format.replace('{transcript}', () => transcript),
       resolve: async ({ request }) => { seen.preflights.push(request); if (audioTranscript) request.ctx.media = request.ctx.media.map((item, index) =>
         index === 0 ? { ...item, transcribed: true } : item); return audioTranscript; },
       send: async (params) => { seen.transcriptEchoes.push(params); },
