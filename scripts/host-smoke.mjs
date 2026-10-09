@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { installRuntime, config, event } from '../test/helpers.js';
 import { checkHostAudio } from './host-audio-smoke.mjs';
+import { checkHostFiles } from './host-file-smoke.mjs';
 
 const root = resolve(fileURLToPath(new URL('../', import.meta.url)));
 process.chdir(root);
@@ -27,6 +28,36 @@ try {
   const { handleInbound } = await import(pathToFileURL(join(base, 'dist/inbound.js')));
   const { normalizeVoiceMedia } = await import(pathToFileURL(join(base, 'dist/media.js')));
   const { buildAudioTranscriptionFormData } = await import('openclaw/plugin-sdk/provider-http');
+  const { loadConfig } = await import('openclaw/plugin-sdk/config-runtime');
+  const envKeys = ['OPENCLAW_CONFIG_PATH', 'OPENCLAW_STATE_DIR', 'VK_WORKSPACE_BOT_TOKEN'];
+  const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  try {
+    process.env.OPENCLAW_CONFIG_PATH = join(dir, 'env-config.json');
+    process.env.OPENCLAW_STATE_DIR = join(dir, 'env-state');
+    process.env.VK_WORKSPACE_BOT_TOKEN = 'TEST-ENV-CREDENTIAL';
+    const source = setup.setupPlugin.setup.applyAccountConfig({ cfg: config({ enabled: true,
+      dmPolicy: 'pairing', baseUrl: 'https://shared.example', accounts: {
+        default: { tokenFile: '/not-read/default.token', baseUrl: 'https://default.example',
+          dmPolicy: 'allowlist', allowFrom: ['default-user'] },
+        work: { botToken: 'TEST-WORK-CREDENTIAL' },
+      } }), accountId: 'default', input: { useEnv: true } });
+    source.plugins = { allow: ['vk-workspace'], entries: { 'vk-workspace': { enabled: true } }, load: { paths: [base] } };
+    await writeFile(process.env.OPENCLAW_CONFIG_PATH, JSON.stringify(source));
+    assert(!JSON.stringify(source).includes('TEST-ENV-CREDENTIAL'), 'Setup must persist a reference, not the env secret');
+    const loaded = loadConfig({ pin: false, skipShellEnvFallback: true });
+    assert.equal(loaded.channels['vk-workspace'].accounts.default.botToken, 'TEST-ENV-CREDENTIAL',
+      'The real host loader must expand the persisted reference');
+    assert.equal(resolveAccount(loaded, 'default').token, 'TEST-ENV-CREDENTIAL');
+    assert.equal(resolveAccount(loaded, 'default').baseUrl, 'https://default.example/bot/v1');
+    assert.equal(resolveAccount(loaded, 'work').token, 'TEST-WORK-CREDENTIAL');
+    assert.equal(resolveAccount(loaded, 'work').baseUrl, 'https://shared.example/bot/v1');
+    assert.equal(resolveAccount(loaded, 'work').config.dmPolicy, 'pairing');
+  } finally {
+    for (const key of envKeys) {
+      if (previousEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = previousEnv[key];
+    }
+  }
   const cfg = config({ dmPolicy: 'allowlist', allowFrom: ['user@example.com'] });
   const { core, seen } = installRuntime({ cfg });
   let registered;
@@ -173,6 +204,7 @@ try {
     assert.equal(requests.at(-1).searchParams.get('chatId'), 'thread@chat.agent');
 
   } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
+  await checkHostFiles(base, dir);
   await checkHostAudio(base, dir);
   console.log('Packed plugin with real OpenClaw SDK: registration, model menus, pairing, audio multipart metadata, HTTP send/edit/delete/voice/forward/pin/thread, context isolation, callbacks and duplicate suppression passed');
 } finally { await rm(dir, { recursive: true, force: true }); }

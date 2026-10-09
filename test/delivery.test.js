@@ -88,7 +88,8 @@ test('voice-only group message can satisfy requireMention through OpenClaw audio
   assert.equal(seen.preflights.length, 1); assert.equal(seen.dispatches, 1);
   assert.match(seen.contexts[0].BodyForAgent, /Audio transcript.*OpenClaw, ответь/);
   assert.equal(seen.contexts[0].media[0].kind, 'audio'); assert.equal(seen.contexts[0].media[0].transcribed, true);
-  assert.equal(seen.transcriptEchoes.length, 1);
+  const replies = server.requests.filter((request) => request.url.pathname.endsWith('/messages/sendText'));
+  assert.equal(replies.filter((request) => request.url.searchParams.get('text') === '📝 &quot;OpenClaw, ответь&quot;').length, 1);
 });
 test('voice preflight without a spoken mention does not start an agent turn or echo a transcript', async (t) => {
   let server;
@@ -106,6 +107,7 @@ test('voice preflight without a spoken mention does not start an agent turn or e
     self, cfg, account: resolveAccount(cfg), api: new TeamsApi(resolveAccount(cfg)) });
   assert.equal(seen.preflights.length, 1); assert.equal(seen.dispatches, 0);
   assert.equal(seen.sessions.length, 0); assert.equal(seen.transcriptEchoes.length, 0);
+  assert.equal(server.requests.filter((request) => request.url.pathname.endsWith('/messages/sendText')).length, 0);
 });
 test('voice preflight refuses mixed attachment messages before every download', async () => {
   const cfg = config({ groupPolicy: 'allowlist', groupAllowFrom: ['user@example.com'],
@@ -167,6 +169,7 @@ test('multiple outbound attachments retain caption and all remaining text; reply
   assert.equal(sent.filter((item) => item.replyToId).length, 1);
 });
 test('local media rejects absent roots, traversal, escaping symlinks and oversize files', async (t) => {
+  installRuntime();
   const dir = await tempDir(t); const root = join(dir, 'allowed'); await mkdir(root);
   await writeFile(join(root, 'ok.txt'), 'hello'); await writeFile(join(dir, 'secret.txt'), 'secret');
   await symlink(join(dir, 'secret.txt'), join(root, 'escape.txt'));

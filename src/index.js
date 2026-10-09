@@ -4,6 +4,7 @@ import { resolveControlCommandGate } from 'openclaw/plugin-sdk/command-auth-nati
 import { toInboundMediaFacts } from 'openclaw/plugin-sdk/channel-inbound';
 import { createReplyPrefixOptions } from 'openclaw/plugin-sdk/channel-outbound';
 import { getAgentScopedMediaLocalRoots } from 'openclaw/plugin-sdk/media-local-roots';
+import { readLocalFileFromRoots } from 'openclaw/plugin-sdk/file-access-runtime';
 import { createChannelPreflightAudio, formatAudioTranscriptForAgent } from 'openclaw/plugin-sdk/media-understanding-runtime';
 import { channelReadyPatch, channelStoppedPatch, createTransportActivityStatusPatch } from 'openclaw/plugin-sdk/gateway-runtime';
 import { channelPlugin } from './channel.js';
@@ -11,6 +12,7 @@ import { setRuntime } from './runtime.js';
 export { channelPlugin };
 export const sdkHelpers = { createPairing: createChannelPairingController, commandGate: resolveControlCommandGate,
   mediaFacts: toInboundMediaFacts, replyPrefix: createReplyPrefixOptions, mediaRoots: getAgentScopedMediaLocalRoots,
+  readLocalFileFromRoots,
   audioPreflight: createChannelPreflightAudio({ channel: 'vk-workspace',
     isAudio: (media) => media?.kind === 'audio' || media?.contentType?.startsWith('audio/') === true }),
   formatAudioTranscript: formatAudioTranscriptForAgent, channelReadyPatch, channelStoppedPatch,
