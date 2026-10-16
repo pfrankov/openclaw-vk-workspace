@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-10-16
+
 ### Fixed
 
 - Cancel all inbox workers on fatal persistence errors and retain the consumer lock until every handler settles. Started unfinished turns remain available for manual recovery without automatic replay or late sends.
@@ -13,6 +15,12 @@
 ### Tests
 
 - Add disk-failure, restart, authorization and cancellation regressions with real local HTTP. Extend the packed-plugin smoke with genuine OpenClaw 2026.9.3 configuration loading, safe-file boundary checks and preflight-echo cancellation.
+
+### Scope and recovery
+
+- After an ambiguous edit or failure to save its confirmed result, inspect the visible message before any manual retry. Old callback tokens remain disabled; delivery and tool execution are not exactly once.
+- Local-file containment is best effort, not kernel-atomic confinement. A handler that ignores cancellation retains the consumer lock until it settles.
+- Plugin updates remain explicit on each Gateway; publishing this version does not replace a running plugin. Validation uses local synthetic Bot API/STT fixtures and the pinned SDK, not a live corporate server.
 
 ## [0.1.14] - 2026-10-03
 
