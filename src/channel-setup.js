@@ -1,4 +1,4 @@
-import { CHANNEL_ID, channelSchema, uiHints, listAccountIds, defaultAccountId, resolveAccount,
+import { CHANNEL_ID, DEFAULT_ENV_TOKEN_REFERENCE, channelSchema, uiHints, listAccountIds, defaultAccountId, resolveAccount,
   inspectAccount, normalizeId, editAccount, sectionOf } from './config.js';
 import { isAbsolute } from 'node:path';
 
@@ -57,10 +57,10 @@ export const setupPlugin = {
         if (input.tokenFile) current.tokenFile = input.tokenFile;
         else current.botToken = input.token;
       }
-      // Explicit default-account entries can use --use-env without copying a secret into the config.
-      if (input.useEnv && section.accounts?.default) {
-        Object.assign(section, section.accounts.default);
-        delete section.accounts.default;
+      // Use the host's env substitution without moving account-local policies or
+      // endpoints into the shared section inherited by sibling accounts.
+      if (input.useEnv && id === 'default' && section.accounts?.default) {
+        current.botToken = DEFAULT_ENV_TOKEN_REFERENCE;
       }
       current.enabled = true; section.enabled = true;
       return { ...cfg, channels: { ...cfg.channels, [CHANNEL_ID]: section } };

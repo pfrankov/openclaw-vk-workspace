@@ -13,7 +13,7 @@ export async function checkHostAudio(base, dir) {
     { handleInbound }, { setRuntime }, { sdkHelpers }] = await Promise.all(
     ['media', 'api', 'config', 'inbox', 'monitor', 'inbound', 'runtime', 'index'].map(load));
   const audio = await readFile(new URL('../test/fixtures/voice.aac', import.meta.url));
-  const requests = [], downloads = [], serverErrors = [];
+  const requests = [], downloads = [], echoes = [], serverErrors = [];
   let rejectTranscription = false;
   const start = async (handler) => {
     const server = createServer((req, res) => {
@@ -44,6 +44,9 @@ export async function checkHostAudio(base, dir) {
           name: file.name, type: file.type, bytes: Buffer.from(await file.arrayBuffer()) });
         res.statusCode = rejectTranscription ? 400 : 200;
         res.end(JSON.stringify(rejectTranscription ? { error: { message: 'Test transcription rejected' } } : { text: 'OpenClaw, hello' }));
+      } else if (url.pathname === '/bot/v1/messages/sendText') {
+        echoes.push(url);
+        res.end(JSON.stringify({ ok: true, msgId: `echo-${echoes.length}` }));
       } else { res.statusCode = 404; res.end('{}'); }
     });
     const cfg = { ...config({ baseUrl: origin(server), allowInsecureHttp: true, mediaAllowedOrigins: [origin(cdn)],
@@ -95,7 +98,38 @@ export async function checkHostAudio(base, dir) {
       assert.equal(seen.dispatches, 1); assert.equal(seen.contexts[0].MessageSid, 'message-87');
       assert.equal(inbox.state.failed.length, 0); assert.equal(inbox.state.pending.length, 0); assert.equal(inbox.state.cursor, '87');
     } finally { await inbox.close(); }
+
+    rejectTranscription = false;
+    cfg.tools.media.audio.echoTranscript = true;
+    cfg.tools.media.audio.echoFormat = 'Heard: {transcript}';
+    const chat = { chatId: 'group@chat.agent', type: 'group' };
+    let echoPreflights = 0;
+    const echoPreflight = createChannelPreflightAudio({ channel: 'vk-workspace', isAudio: () => true,
+      transcribeFirstAudio: async ({ cfg: next }) => {
+        echoPreflights++;
+        assert.equal(next.tools.media.audio.echoTranscript, false, 'Preflight must suppress the provider echo');
+        return (await transcribe(next)).text;
+      },
+      // The real factory's send contract has no AbortSignal. Keep its transport
+      // local and deterministic so a late invocation is observable over HTTP.
+      sendTranscriptEcho: async ({ ctx, transcript, format }) => {
+        assert.equal(ctx.OriginatingTo, `vk-workspace:${chat.chatId}`);
+        await api.sendText(chat.chatId, echoPreflight.format(transcript, format));
+      },
+    });
+    setRuntime(core, { ...sdkHelpers, audioPreflight: echoPreflight });
+    // Positive control: the actual helper can deliver through this fixture.
+    await echoPreflight.send({ cfg, transcript: 'OpenClaw, hello', accountId: account.accountId,
+      originatingTo: `vk-workspace:${chat.chatId}` });
+    assert.equal(echoes.length, 1); assert.equal(echoes[0].searchParams.get('text'), 'Heard: OpenClaw, hello');
+    const controller = new AbortController();
+    core.channel.session.recordInboundSession = async () => { controller.abort(); };
+    await assert.rejects(handleInbound({ event: event(88, { chat, text: '', parts }), self: { userId: 'bot@example.com' },
+      cfg, account, api, signal: controller.signal }), { name: 'AbortError' });
+    assert.equal(echoPreflights, 1); assert.equal(requests.length, 3, 'Cancellation follows a successful real STT request');
+    assert.equal(echoes.length, 1, 'Session cancellation must prevent a late transcript echo');
+    assert.equal(seen.dispatches, 1, 'Session cancellation must prevent agent dispatch');
     assert.deepEqual(serverErrors, []);
-    console.log('Real SDK audio: separate CDN -> AAC -> configured OpenAI media provider -> HTTP multipart; scoped private-network denial; failed STT preflight preserves mention gating and next-event progress');
+    console.log('Real SDK audio: separate CDN -> AAC -> configured OpenAI media provider -> HTTP multipart; scoped private-network denial; failed STT preflight preserves mention gating and next-event progress; session cancellation blocks deferred transcript echo and dispatch');
   } finally { if (server) await stop(server); await stop(cdn); }
 }

@@ -84,6 +84,34 @@ test('setup replaces tokenFile with token and preserves URL and sibling accounts
 test('setup rejects a relative tokenFile before writing configuration', () => {
   assert.match(setupPlugin.setup.validateInput({ accountId: 'default', input: { tokenFile: 'relative.token' } }), /absolute/);
 });
+test('switching an explicit default account to environment credentials preserves account boundaries', () => {
+  const cfg = config({ enabled: true, dmPolicy: 'pairing', baseUrl: 'https://shared.example',
+    actions: { pins: false }, accounts: {
+      default: { tokenFile: '/not-read/default.token', enabled: false, dmPolicy: 'open',
+        baseUrl: 'https://default.example', actions: { pins: true }, groups: { '*': { allowFrom: ['*'] } } },
+      work: { botToken: 'work-token' }, other: { botToken: 'other-token', enabled: false },
+    } });
+  const original = structuredClone(cfg);
+  const next = setupPlugin.setup.applyAccountConfig({ cfg, accountId: 'default', input: { useEnv: true } });
+  const section = next.channels['vk-workspace'];
+  const { tokenFile: _file, ...defaultSettings } = cfg.channels['vk-workspace'].accounts.default;
+  assert.deepEqual(section.accounts.default, { ...defaultSettings,
+    botToken: '${VK_WORKSPACE_BOT_TOKEN}', enabled: true },
+  'Environment setup must keep default settings scoped to that account');
+  for (const id of ['work', 'other']) assert.deepEqual(resolveAccount(next, id, { env: {} }), resolveAccount(cfg, id, { env: {} }));
+  assert.equal(section.dmPolicy, 'pairing'); assert.equal(section.baseUrl, 'https://shared.example');
+  assert.deepEqual(section.actions, { pins: false }); assert.equal(section.groups, undefined);
+  const fromEnv = resolveAccount(next, 'default', { env: { VK_WORKSPACE_BOT_TOKEN: 'test-default-env' } });
+  assert.equal(fromEnv.token, 'test-default-env'); assert.equal(fromEnv.tokenSource, 'env');
+  const missing = resolveAccount(next, 'default', { env: {} });
+  assert.equal(missing.token, ''); assert.equal(missing.configured, false);
+  assert.deepEqual(cfg, original, 'Setup must not mutate the supplied configuration');
+});
+test('implicit default environment setup keeps the existing environment fallback', () => {
+  const next = setupPlugin.setup.applyAccountConfig({ cfg: config(), accountId: 'default', input: { useEnv: true } });
+  assert.equal(next.channels['vk-workspace'].botToken, undefined);
+  assert.equal(resolveAccount(next, 'default', { env: { VK_WORKSPACE_BOT_TOKEN: 'test-env' } }).token, 'test-env');
+});
 test('cold setup uses exactly the manifest-owned runtime schema', () => assert.deepEqual(setupPlugin.configSchema.schema, channelSchema));
 test('disabling or deleting the default account does not disable named accounts', () => {
   const cfg = config({ accounts: { work: { botToken: 'work' } } });

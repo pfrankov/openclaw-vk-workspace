@@ -132,9 +132,12 @@ export async function editMessage(to, messageId, payload, options = {}) {
     const menu = data.buttons === undefined ? { keyboard: entry.keyboard, callbacks: entry.callbacks }
       : prepareKeyboard(data.buttons, options.requesterSenderId ?? entry.requesterId ?? data.buttonOwnerId);
     await beforePlatformAction(options);
-    try { await api.editText(target, messageId, body.text, { ...body, signal: options.signal, inlineKeyboardMarkup: menu.keyboard }); }
-    catch { throw Object.assign(new Error('VK Workspace edit failed; inspect the message before retrying'), { editAttempted: true, noRetry: true }); }
     return { ...body, parseMode: body.parseMode, format: body.format, ...menu };
+  }, async (patch) => {
+    await beforePlatformAction(options);
+    try { await api.editText(target, messageId, patch.text, { parseMode: patch.parseMode, format: patch.format,
+      signal: options.signal, inlineKeyboardMarkup: patch.keyboard }); }
+    catch { throw Object.assign(new Error('VK Workspace edit failed; inspect the message before retrying'), { noRetry: true, mayHaveSent: true }); }
   });
   return { channel: CHANNEL_ID, chatId: target, messageId };
 }

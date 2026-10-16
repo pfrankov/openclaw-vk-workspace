@@ -3,6 +3,7 @@ import { isAbsolute } from 'node:path';
 
 export const CHANNEL_ID = 'vk-workspace';
 export const DEFAULT_ACCOUNT_ID = 'default';
+export const DEFAULT_ENV_TOKEN_REFERENCE = '${VK_WORKSPACE_BOT_TOKEN}';
 export const DEFAULT_BASE_URL = 'https://api.internal.myteam.mail.ru/bot/v1';
 const TOKEN_FILE_MAX_BYTES = 64 * 1024;
 export const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -54,7 +55,8 @@ function readTokenFile(path) {
   let fd;
   try {
     if (lstatSync(path).isSymbolicLink()) throw new Error('invalid token file');
-    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // A FIFO must reach the descriptor check without waiting for a writer.
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.size > TOKEN_FILE_MAX_BYTES) throw new Error('invalid token file');
     const buffer = Buffer.allocUnsafe(TOKEN_FILE_MAX_BYTES + 1);
@@ -146,8 +148,10 @@ export function resolveAccount(cfg, requestedId, { env = process.env, readToken 
   // Named accounts inherit policy/URL, never another account's credentials or the default environment token.
   const credentials = own ?? (accountId === DEFAULT_ACCOUNT_ID ? { botToken: rootToken, tokenFile: rootFile } : {});
   if (credentials.botToken && credentials.tokenFile) throw new Error('Set botToken or tokenFile, not both');
-  let token = credentials.botToken?.trim() || '';
-  let tokenSource = token ? 'config' : 'none';
+  // Setup can return source config before the host expands its env references.
+  const envReference = accountId === DEFAULT_ACCOUNT_ID && credentials.botToken === DEFAULT_ENV_TOKEN_REFERENCE;
+  let token = (envReference ? env.VK_WORKSPACE_BOT_TOKEN : credentials.botToken)?.trim() || '';
+  let tokenSource = token ? envReference ? 'env' : 'config' : 'none';
   if (credentials.tokenFile) {
     tokenSource = 'file';
     if (!isAbsolute(credentials.tokenFile)) throw new Error('VK Workspace tokenFile must be an absolute path');

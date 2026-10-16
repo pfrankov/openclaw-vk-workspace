@@ -1,9 +1,9 @@
-import { open, realpath } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { basename, extname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readBounded } from './api.js';
 import { ProcessingFailure } from './processing-failure.js';
+import { getRuntime } from './runtime.js';
 
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.gif': 'image/gif', '.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown',
@@ -113,21 +113,18 @@ export async function readLocalMedia(input, roots, maxBytes) {
   for (const candidate of isAbsolute(path) ? [path] : allowed.map((root) => resolve(root, path))) {
     const resolved = await realpath(candidate).catch(() => null);
     if (!resolved || !inside(resolved)) continue;
-    const file = await open(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // Path selection is advisory. The SDK checks the opened descriptor's
+    // identity, root boundary, file type and size before returning bytes.
     try {
-      const stat = await file.stat();
-      if (!stat.isFile() || stat.size > maxBytes) throw new Error('Local media is not a regular file or exceeds the size limit');
-      // Read from the validated descriptor with a cap, including files that grow after stat().
-      const chunks = [];
-      let size = 0;
-      for await (const chunk of file.createReadStream({ autoClose: false })) {
-        size += chunk.length;
-        if (size > maxBytes) throw new Error('Local media exceeds the size limit');
-        chunks.push(chunk);
-      }
-      return { buffer: Buffer.concat(chunks, size), fileName: safeFileName(resolved),
-        contentType: MIME[extname(resolved).toLowerCase()] || 'application/octet-stream' };
-    } finally { await file.close(); }
+      const file = await getRuntime().sdk.readLocalFileFromRoots({ filePath: resolved, roots: allowed,
+        maxBytes: Math.floor(maxBytes), symlinks: 'follow-within-root' });
+      // A newly canonicalized SDK root cannot widen the original allowed paths.
+      if (!file || !inside(file.realPath)) throw new Error('Local media read rejected');
+      return { buffer: file.buffer, fileName: safeFileName(file.realPath),
+        contentType: MIME[extname(file.realPath).toLowerCase()] || 'application/octet-stream' };
+    } catch {
+      throw new Error('Local media is not a regular file, is outside approved roots, or exceeds the size limit');
+    }
   }
   throw new Error('Local media is missing or outside OpenClaw-approved media roots');
 }

@@ -191,8 +191,19 @@ export async function handleInbound({ event, self, account, cfg, api, signal, lo
   });
   await core.channel.session.recordInboundSession({ storePath, ctx, sessionKey: route.sessionKey,
     onRecordError: () => log?.('VK Workspace session metadata could not be updated') });
-  if (preflightTranscript) await sdk.audioPreflight.send({ transcript: preflightTranscript, cfg,
-    accountId: account.accountId, originatingTo: `${CHANNEL_ID}:${message.chatId}` });
+  signal?.throwIfAborted();
+  const audio = cfg.tools?.media?.audio;
+  if (preflightTranscript && audio?.echoTranscript) {
+    try {
+      // The pinned SDK's echo sender has no cancellation contract. Keep its
+      // formatting, but deliver through the same abortable path as the reply.
+      await sendPayload(message.chatId, { text: sdk.audioPreflight.format(preflightTranscript, audio.echoFormat ?? '📝 "{transcript}"') },
+        { cfg, account, api, core, signal, requesterSenderId: message.senderId, messageStore: store });
+    } catch {
+      signal?.throwIfAborted();
+      log?.('VK Workspace audio transcript echo failed');
+    }
+  }
   signal?.throwIfAborted();
   setStatus?.({ lastInboundAt: Date.now() });
   const { onModelSelected, ...prefix } = sdk.replyPrefix({ cfg, agentId: route.agentId, channel: CHANNEL_ID, accountId: account.accountId });

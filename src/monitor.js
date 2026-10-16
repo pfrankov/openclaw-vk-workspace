@@ -19,27 +19,36 @@ export async function drainInbox({ inbox, handle, signal, onFailure }) {
     groups.get(key).push(item);
   }
   const queues = [...groups.values()];
+  const cancelled = new AbortController();
+  const turnSignal = signal ? AbortSignal.any([signal, cancelled.signal]) : cancelled.signal;
   const worker = async () => {
-    while (!signal?.aborted && queues.length) {
+    while (!turnSignal.aborted && queues.length) {
       for (const item of queues.shift()) {
-        if (signal?.aborted) return;
+        if (turnSignal.aborted) return;
         if (item.cancelledBy) { await inbox.complete(item.event.eventId); continue; }
         await inbox.start(item.event.eventId); // Durable fence before any possible agent/tool effect.
-        try { await handle(item.event); }
+        if (turnSignal.aborted) return;
+        try { await handle(item.event, turnSignal); }
         catch (error) {
-          if (signal?.aborted) return;
+          if (turnSignal.aborted) return;
           const failure = safeFailure(error);
           await inbox.fail(item.event.eventId, { terminal: true, failure });
           onFailure?.(item.event.eventId, failure);
           // Preserve order: an operator must resolve the failed turn before this chat continues.
           break;
         }
-        if (signal?.aborted) return;
+        if (turnSignal.aborted) return;
         await inbox.complete(item.event.eventId);
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(4, queues.length) }, worker));
+  // A fatal storage error must stop every chat, but the consumer lock remains
+  // owned until even handlers that ignore cancellation have settled.
+  const results = await Promise.allSettled(Array.from({ length: Math.min(4, queues.length) }, () => worker().catch((error) => {
+    cancelled.abort(); throw error;
+  })));
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 export async function monitorAccount(ctx, deps = {}) {
   const account = ctx.account;
@@ -75,7 +84,7 @@ export async function monitorAccount(ctx, deps = {}) {
     while (!signal?.aborted) {
       if (inbox.state.pending.length) {
         await drainInbox({ inbox, signal,
-          handle: (event) => (deps.handle ?? handleInbound)({ event, self, account, cfg: ctx.cfg, api, signal, log, setStatus }),
+          handle: (event, turnSignal) => (deps.handle ?? handleInbound)({ event, self, account, cfg: ctx.cfg, api, signal: turnSignal, log, setStatus }),
           onFailure: (id, failure) => {
             const message = `Event ${id} failed at ${failure.stage}/${failure.code}: ${failure.message}`;
             log(`VK Workspace ${message}; retained in durable inbox`);

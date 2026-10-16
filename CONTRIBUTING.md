@@ -11,6 +11,8 @@ npm run check:host
 
 `npm run check` запускает тесты, сборку и проверку npm-архива. `check:host` загружает упакованный плагин с закреплённым настоящим SDK OpenClaw. Пользовательские action/result-контракты находятся в [SCENARIOS.md](SCENARIOS.md).
 
+Host smoke проверяет нативную подстановку токена из окружения, файловый API SDK (разрешённые корни, symlink, hard link, FIFO и подмену каталогов), а также аудио и отмену эха. В аудиопроверках используются локальные Bot API/STT fixtures. Unit doubles не заменяют эти проверки SDK. Регрессии очереди и журнала сообщений отдельно проверяют ошибки файловой системы, отмену параллельных ходов и восстановление после повторного открытия.
+
 HTTP-контракт сверяется с [OpenAPI subset](https://github.com/pfrankov/n8n-nodes-vk-teams/blob/master/docs/vk-teams-bot-api.openapi.yaml) и [официальным Python SDK](https://github.com/mail-ru-im/bot-python). Дополнительно: [VK Teams Bot API](https://teams.vk.com/botapi/?lang=ru) и [SDK каналов OpenClaw](https://docs.openclaw.ai/plugins/sdk-channel-plugins).
 
 ## Выпуск
